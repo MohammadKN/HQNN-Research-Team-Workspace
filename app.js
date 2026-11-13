@@ -81,8 +81,11 @@ function saveCell(k, rid, cid, val, ms) {
   }, ms);
 }
 function fmt(r) {
-  var d = r.at ? new Date(Number(r.at)).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
-  return r.by && d ? r.by + " · " + d : (r.by || d);
+  var edits = r.edits && r.edits.length ? r.edits : (r.by || r.at ? [{ by: r.by, at: r.at }] : []);
+  return edits.map(function (edit) {
+    var d = edit.at ? new Date(Number(edit.at)).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+    return edit.by && d ? edit.by + " · " + d : (edit.by || d);
+  }).join("\n");
 }
 
 function render(k) {

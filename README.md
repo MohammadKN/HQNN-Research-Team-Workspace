@@ -19,11 +19,12 @@ Google Apps Script backend (Code.gs). No server and no paid services are needed.
 
 ## How it works
 
-- Tabs `papers`, `gaps`, `qs` and `_meta` are created in your sheet automatically. You can open the sheet and read or
+- Tabs `papers`, `gaps`, `qs`, `_meta` and `_edits` are created in your sheet automatically. You can open the sheet and read or
   chart the data there at any time. Do not rename those tabs. Columns beginning with `_` are used by the site.
 - The page re-reads the sheet every few seconds (`POLL_MS` in config.js), so teammates see each other's changes shortly after they are saved.
 - Adding, renaming or deleting a column in the site updates the sheet header and moves the data accordingly.
 - The approved-name check is enforced in both the page and `Code.gs`, so direct mutation requests are rejected too.
+- Each row keeps its 10 most recent edits in the Last edit column. The full edit history is stored in `_edits`.
 
 ## Good to know
 

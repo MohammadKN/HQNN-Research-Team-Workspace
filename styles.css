@@ -20,7 +20,7 @@ table{border-collapse:collapse;width:100%}
 th,td{border:1px solid var(--bd);padding:.35rem;vertical-align:top;text-align:left;min-width:16rem}
 th{background:var(--hd);min-width:14rem}
 th.n,td.n{min-width:2.5rem;width:2.5rem;text-align:center;color:var(--mu);padding-top:.6rem}
-td.l{min-width:9rem;color:var(--mu);font-size:.85rem;padding:.6rem}
+td.l{min-width:13rem;color:var(--mu);font-size:.85rem;padding:.6rem;white-space:pre-line}
 td.x,th.x{min-width:4.5rem;width:4.5rem;text-align:center}
 .hc{display:flex;gap:.3rem;align-items:flex-start}
 textarea,select,input{width:100%;background:var(--sf);color:var(--tx);border:1px solid var(--bd);border-radius:4px;padding:.45rem .55rem;font:inherit}

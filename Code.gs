@@ -1,6 +1,6 @@
 /**
  * Google Apps Script backend: turns the Google Sheet this script is attached to into the database.
- * Setup is in README.md. Tabs "papers", "gaps", "qs" and "_meta" are created automatically.
+ * Setup is in README.md. Tabs "papers", "gaps", "qs", "_meta" and "_edits" are created automatically.
  */
 var TOKEN = "CHANGE_ME_SECRET"; // must match TOKEN in config.js
 var USERS = ["Mustafa", "Zaid", "Saleem", "Moe", "MKN"];
@@ -28,6 +28,29 @@ function doPost(e) {
   }
 }
 function out(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
+function editsTab(ss) {
+  var t = ss.getSheetByName("_edits");
+  if (!t) {
+    t = ss.insertSheet("_edits");
+    t.getRange(1, 1, 1, 4).setValues([["_at", "_sheet", "_row", "_by"]]);
+    t.setFrozenRows(1);
+  }
+  return t;
+}
+function recordEdit(ss, sheet, rowId, by) {
+  editsTab(ss).appendRow([Date.now(), sheet, rowId, by || ""]);
+}
+function editHistory(ss) {
+  var t = ss.getSheetByName("_edits"), history = {};
+  if (!t || t.getLastRow() < 2) return history;
+  var rows = t.getRange(2, 1, t.getLastRow() - 1, 4).getValues();
+  for (var i = rows.length - 1; i >= 0; i--) {
+    var key = rows[i][1] + "|" + rows[i][2];
+    if (!history[key]) history[key] = [];
+    if (history[key].length < 10) history[key].push({ by: rows[i][3], at: rows[i][0] });
+  }
+  return history;
+}
 
 // Column definitions (id, name, type) live in the "_meta" tab: A = sheet key, B = JSON.
 function metaTab(ss) { return ss.getSheetByName("_meta") || ss.insertSheet("_meta"); }
@@ -64,7 +87,7 @@ function appendRows(t, rows) {
 
 var A = {
   getAll: function (ss, r) {
-    var res = {};
+    var res = {}, history = editHistory(ss);
     Object.keys(r.defaults).forEach(function (key) {
       var cols = getCols(ss, key);
       if (!cols) { cols = r.defaults[key]; setCols(ss, key, cols); }
@@ -72,7 +95,9 @@ var A = {
       if (n > 1) {
         t.getRange(2, 1, n - 1, 3 + cols.length).getValues().forEach(function (row) {
           if (!row[0]) return;
-          var o = { id: row[0], by: row[1], at: row[2], v: {} };
+          var historyKey = key + "|" + row[0];
+          var o = { id: row[0], by: row[1], at: row[2], edits: history[historyKey] || [], v: {} };
+          if (!o.edits.length && (row[1] || row[2])) o.edits.push({ by: row[1], at: row[2] });
           cols.forEach(function (c, i) { o.v[c.id] = row[3 + i] === "" ? "" : String(row[3 + i]); });
           rows.push(o);
         });
@@ -84,11 +109,14 @@ var A = {
   addRow: function (ss, r) {
     var cols = getCols(ss, r.sheet), t = tab(ss, r.sheet, cols), id = Utilities.getUuid().slice(0, 8);
     appendRows(t, [newRow(cols, id, r.by, r.values)]);
+    recordEdit(ss, r.sheet, id, r.by);
     return { id: id };
   },
   addRows: function (ss, r) {
     var cols = getCols(ss, r.sheet), t = tab(ss, r.sheet, cols);
-    appendRows(t, r.rows.map(function (v) { return newRow(cols, Utilities.getUuid().slice(0, 8), r.by, v); }));
+    var ids = r.rows.map(function (v) { return Utilities.getUuid().slice(0, 8); });
+    appendRows(t, r.rows.map(function (v, i) { return newRow(cols, ids[i], r.by, v); }));
+    ids.forEach(function (id) { recordEdit(ss, r.sheet, id, r.by); });
     return { ok: true };
   },
   updateCell: function (ss, r) {
@@ -98,6 +126,7 @@ var A = {
     if (c < 0) throw new Error("Column no longer exists");
     t.getRange(i + 2, 4 + c).setNumberFormat("@").setValue(r.value);
     t.getRange(i + 2, 2, 1, 2).setValues([[r.by || "", Date.now()]]);
+    recordEdit(ss, r.sheet, r.rowId, r.by);
     return { ok: true };
   },
   deleteRow: function (ss, r) {
