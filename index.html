@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HQNN Research Team Workspace</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<h1>HQNN Research Team Workspace</h1>
+<p class="sub">One shared workspace for the whole team, stored in a Google Sheet. Add or rename columns and rows as you go.</p>
+<div class="who"><label for="me">Your name</label><input id="me" type="text" placeholder="e.g. MKN"></div>
+<div id="status">Connecting…</div>
+<div class="tabs" id="tabs"></div>
+<div id="panes"></div>
+<div class="pane" id="pane-guide">
+<dl>
+<dt>Venue / DOI</dt><dd>Where the paper appeared (journal, conference, arXiv) and its permanent identifier.</dd>
+<dt>Baseline (parameter-matched?)</dt><dd>The classical model the hybrid was compared against, and whether it had a similar number of trainable parameters and equal tuning effort.</dd>
+<dt>Noise Model</dt><dd>Ideal simulator, simulator with noise (name the source), or real hardware (device and shots).</dd>
+<dt>Qubit Count</dt><dd>Largest circuit used in the experiments.</dd>
+<dt>Code Released?</dt><dd>Yes or no, with the repository link.</dd>
+<dt>Limitations</dt><dd>What the authors admit in their limitations or future work section.</dd>
+<dt>Assigned to / Status</dt><dd>Who is reading the paper and how far along they are, so nobody duplicates work.</dd>
+</dl>
+</div>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
