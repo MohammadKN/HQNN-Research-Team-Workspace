@@ -7,22 +7,42 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<h1>HQNN Research Team Workspace</h1>
-<p class="sub">One shared workspace for the whole team, stored in a Google Sheet. Add or rename columns and rows as you go.</p>
-<div class="who"><label for="me">Your name</label><input id="me" type="text" placeholder="Mustafa, Zaid, Saleem, Moe, or MKN" autocomplete="name"></div>
-<div id="status">Connecting…</div>
-<div class="tabs" id="tabs"></div>
-<div id="panes"></div>
-<div class="pane" id="pane-guide">
-<dl>
-<dt>Venue / DOI</dt><dd>Where the paper appeared (journal, conference, arXiv) and its permanent identifier.</dd>
-<dt>Baseline (parameter-matched?)</dt><dd>The classical model the hybrid was compared against, and whether it had a similar number of trainable parameters and equal tuning effort.</dd>
-<dt>Noise Model</dt><dd>Ideal simulator, simulator with noise (name the source), or real hardware (device and shots).</dd>
-<dt>Qubit Count</dt><dd>Largest circuit used in the experiments.</dd>
-<dt>Code Released?</dt><dd>Yes or no, with the repository link.</dd>
-<dt>Limitations</dt><dd>What the authors admit in their limitations or future work section.</dd>
-<dt>Assigned to / Status</dt><dd>Who is reading the paper and how far along they are, so nobody duplicates work.</dd>
-</dl>
+<div class="app-shell">
+<header class="hero">
+  <div class="brand">
+    <div class="brand-mark" aria-hidden="true">Q</div>
+    <div>
+      <p class="eyebrow">Research operations</p>
+      <h1>HQNN <span>Research Workspace</span></h1>
+      <p class="sub">A shared, living library for papers, research gaps, and questions.</p>
+    </div>
+  </div>
+  <div class="session-card">
+    <label for="me">Working as</label>
+    <input id="me" type="text" placeholder="Enter your team name" autocomplete="name">
+    <div id="status" role="status">Connecting…</div>
+  </div>
+</header>
+<main class="workspace">
+  <nav class="tabs" id="tabs" aria-label="Workspace sections"></nav>
+  <div id="panes"></div>
+  <section class="pane" id="pane-guide">
+    <div class="guide-intro">
+      <p class="eyebrow">Reference</p>
+      <h2>Column guide</h2>
+      <p>Use these definitions to keep the team’s notes consistent and comparable.</p>
+    </div>
+    <dl>
+      <dt>Venue / DOI</dt><dd>Where the paper appeared (journal, conference, arXiv) and its permanent identifier.</dd>
+      <dt>Baseline (parameter-matched?)</dt><dd>The classical model the hybrid was compared against, and whether it had a similar number of trainable parameters and equal tuning effort.</dd>
+      <dt>Noise Model</dt><dd>Ideal simulator, simulator with noise (name the source), or real hardware (device and shots).</dd>
+      <dt>Qubit Count</dt><dd>Largest circuit used in the experiments.</dd>
+      <dt>Code Released?</dt><dd>Yes or no, with the repository link.</dd>
+      <dt>Limitations</dt><dd>What the authors admit in their limitations or future work section.</dd>
+      <dt>Assigned to / Status</dt><dd>Who is reading the paper and how far along they are, so nobody duplicates work.</dd>
+    </dl>
+  </section>
+</main>
 </div>
 <script src="config.js"></script>
 <script src="app.js"></script>

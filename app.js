@@ -38,6 +38,12 @@ function requireEditor() {
   meEl.focus();
   return false;
 }
+function updateAccess() {
+  var allowed = canEdit();
+  document.body.classList.toggle("locked", !allowed);
+  if (allowed) refresh();
+  else note("Enter an approved team member name to view the workspace.", true);
+}
 function imageUrl(value) {
   var url = String(value || "").trim();
   return /^https?:\/\/\S+\.(?:png|jpe?g|gif|webp|svg|bmp|avif)(?:[?#]\S*)?$/i.test(url) ? url : "";
@@ -339,10 +345,10 @@ function patch(k) {
   });
 }
 function refresh() {
-  if (loading || pending > 0 || document.hidden) return Promise.resolve();
+  if (!canEdit() || loading || pending > 0 || document.hidden) return Promise.resolve();
   loading = true;
   var d = {}; KEYS.forEach(function (k) { d[k] = SHEETS[k].cols; });
-  return api("getAll", { defaults: d }).then(function (j) {
+  return api("getAll", { defaults: d, by: me() }).then(function (j) {
     KEYS.forEach(function (k) {
       var s = j.sheets[k]; if (!s) return;
       s.rows.forEach(function (r) {
@@ -402,16 +408,17 @@ KEYS.forEach(function (k) {
 show("papers");
 
 meEl.value = localStorage.getItem("hqnn_name") || "";
+document.body.classList.add("locked");
 meEl.addEventListener("input", function () {
   try { localStorage.setItem("hqnn_name", meEl.value); } catch (e) {}
   KEYS.forEach(function (k) { render(k); });
-  note(canEdit() ? "Ready to edit as " + me() + "." : "Enter an approved team member name to edit.", !canEdit());
+  updateAccess();
 });
 
 if (!CFG.API_URL || CFG.API_URL.indexOf("PASTE_") === 0) {
   note("Not connected yet. Open config.js and paste your Apps Script web app URL (see README.md).", true);
 } else {
-  refresh(); setInterval(refresh, CFG.POLL_MS || 8000);
+  updateAccess(); setInterval(refresh, CFG.POLL_MS || 8000);
   document.addEventListener("visibilitychange", refresh);
 }
 })();
