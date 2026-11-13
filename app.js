@@ -9,9 +9,9 @@ var SHEETS = {
     starter: ["Baseline matched and tuned","Realistic noise model","Real-world dataset","Code released","Qubit count beyond toy sizes","Data encoding studied systematically"] },
   qs: { label: "Research Questions", cols: mk([["c1","Research question"],["c2","Why it matters"],["c3","Owner"],["c4","Status","status"]]) }
 };
-var KEYS = Object.keys(SHEETS), S = {}, timers = {}, dirty = {}, pending = 0, loading = false;
+var KEYS = Object.keys(SHEETS), S = {}, widths = {}, timers = {}, dirty = {}, pending = 0, loading = false;
 var statusEl = $("#status"), meEl = $("#me");
-KEYS.forEach(function (k) { S[k] = { cols: SHEETS[k].cols.slice(), rows: [], sig: "", got: false }; });
+KEYS.forEach(function (k) { S[k] = { cols: SHEETS[k].cols.slice(), rows: [], sig: "", got: false }; widths[k] = {}; });
 
 function $(s, r) { return (r || document).querySelector(s); }
 function $$(s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); }
@@ -38,6 +38,123 @@ function requireEditor() {
   meEl.focus();
   return false;
 }
+function imageUrl(value) {
+  var url = String(value || "").trim();
+  return /^https?:\/\/\S+\.(?:png|jpe?g|gif|webp|svg|bmp|avif)(?:[?#]\S*)?$/i.test(url) ? url : "";
+}
+function linkUrls(value) {
+  var seen = {};
+  return String(value || "").split(/\s+/).map(function (part) {
+    var url = part.trim();
+    return /^https?:\/\/\S+$/i.test(url) ? url : "";
+  }).filter(function (url) {
+    if (!url || seen[url]) return false;
+    seen[url] = true;
+    return true;
+  });
+}
+var lightbox, lightboxZoom, lightboxReset, ZOOM_STEP = 0.1;
+function closeLightbox() {
+  if (!lightbox) return;
+  lightbox.remove();
+  lightbox = null;
+  lightboxZoom = null;
+  lightboxReset = null;
+  document.body.classList.remove("lightbox-open");
+}
+function openLightbox(url) {
+  closeLightbox();
+  var zoom = 1;
+  var dragging = false, dragX = 0, dragY = 0, scrollX = 0, scrollY = 0;
+  var image = h("img", { src: url, alt: "Enlarged image" });
+  function setZoom(value) {
+    zoom = Math.max(0.5, Math.min(3, value));
+    image.style.transform = "scale(" + zoom + ")";
+    if (lightbox) lightbox.classList.toggle("zoomed", zoom > 1);
+  }
+  lightboxZoom = function (step) { setZoom(zoom + step); };
+  lightboxReset = function () { setZoom(1); };
+  var close = h("button", { class: "lightbox-close", type: "button", "aria-label": "Close image preview", text: "×",
+    onclick: closeLightbox });
+  var controls = h("div", { class: "lightbox-controls" }, [
+    h("button", { type: "button", "aria-label": "Zoom out", text: "−", onclick: function () { lightboxZoom(-ZOOM_STEP); } }),
+    h("button", { type: "button", "aria-label": "Reset zoom", text: "Reset", onclick: function () { setZoom(1); } }),
+    h("button", { type: "button", "aria-label": "Zoom in", text: "+", onclick: function () { lightboxZoom(ZOOM_STEP); } })
+  ]);
+  lightbox = h("div", { class: "image-lightbox", role: "dialog", "aria-modal": "true", "aria-label": "Enlarged image preview",
+    onclick: function (event) { if (event.target === lightbox) closeLightbox(); },
+    onwheel: function (event) {
+      if (!event.ctrlKey || !lightboxZoom) return;
+      event.preventDefault();
+      lightboxZoom(event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP);
+    },
+    onpointerdown: function (event) {
+      if (zoom <= 1 || event.target.closest(".lightbox-controls, .lightbox-close")) return;
+      dragging = true;
+      dragX = event.clientX;
+      dragY = event.clientY;
+      scrollX = lightbox.scrollLeft;
+      scrollY = lightbox.scrollTop;
+      lightbox.setPointerCapture(event.pointerId);
+      lightbox.classList.add("panning");
+    },
+    onpointermove: function (event) {
+      if (!dragging) return;
+      lightbox.scrollLeft = scrollX - (event.clientX - dragX);
+      lightbox.scrollTop = scrollY - (event.clientY - dragY);
+    },
+    onpointerup: function () {
+      dragging = false;
+      lightbox.classList.remove("panning");
+    },
+    onpointercancel: function () {
+      dragging = false;
+      lightbox.classList.remove("panning");
+    } }, [close, controls, image]);
+  document.body.append(lightbox);
+  document.body.classList.add("lightbox-open");
+  close.focus();
+}
+function preview(value) {
+  var url = imageUrl(value);
+  if (!url) return null;
+  return h("img", {
+    class: "cell-preview",
+    src: url,
+    alt: "Image preview",
+    loading: "lazy",
+    referrerpolicy: "no-referrer",
+    tabindex: "0",
+    role: "button",
+    title: "Click to enlarge",
+    onclick: function () { openLightbox(url); },
+    onkeydown: function (event) {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openLightbox(url); }
+    }
+  });
+}
+function websitePreview(url) {
+  var link = h("a", { href: url, target: "_blank", rel: "noopener noreferrer", text: "Open link" });
+  return h("div", { class: "website-preview" }, [link]);
+}
+function updatePreview(cell, value) {
+  var urls = linkUrls(value), key = urls.join("\n");
+  if (cell.dataset.previewUrls === key) return;
+  $$(".cell-preview, .website-preview", cell).forEach(function (preview) { preview.remove(); });
+  urls.forEach(function (url) {
+    var next = imageUrl(url) ? preview(url) : websitePreview(url);
+    next.dataset.url = url;
+    cell.append(next);
+  });
+  cell.dataset.previewUrls = key;
+}
+document.addEventListener("keydown", function (event) {
+  if (event.key === "Escape") closeLightbox();
+  else if (lightbox && event.key.toLowerCase() === "q") { event.preventDefault(); closeLightbox(); }
+  else if (lightboxReset && event.key.toLowerCase() === "r") { event.preventDefault(); lightboxReset(); }
+  else if (lightboxZoom && (event.key === "=" || event.key === "+")) { event.preventDefault(); lightboxZoom(ZOOM_STEP); }
+  else if (lightboxZoom && (event.key === "-" || event.key === "_")) { event.preventDefault(); lightboxZoom(-ZOOM_STEP); }
+});
 
 function api(action, data) {
   var body = Object.assign({ token: CFG.TOKEN, action: action }, data || {});
@@ -87,11 +204,41 @@ function fmt(r) {
     return edit.by && d ? edit.by + " · " + d : (edit.by || d);
   }).join("\n");
 }
+function setTableColumnWidth(table, index, width) {
+  Array.prototype.forEach.call(table.rows, function (row) {
+    if (row.cells[index]) {
+      row.cells[index].style.width = width + "px";
+      row.cells[index].style.minWidth = width + "px";
+    }
+  });
+}
+function resizeColumn(k, handle, event) {
+  var header = handle.closest("th"), table = header && header.closest("table");
+  if (!header || !table) return;
+  var index = header.cellIndex, startX = event.clientX, startWidth = header.getBoundingClientRect().width;
+  var move = function (current) {
+    var width = Math.max(10 * 16, startWidth + current.clientX - startX);
+    setTableColumnWidth(table, index, width);
+    widths[k][header.dataset.rcol] = width;
+  };
+  var stop = function () {
+    handle.removeEventListener("pointermove", move);
+    handle.removeEventListener("pointerup", stop);
+    handle.removeEventListener("pointercancel", stop);
+  };
+  event.preventDefault();
+  event.stopPropagation();
+  handle.addEventListener("pointermove", move);
+  handle.addEventListener("pointerup", stop);
+  handle.addEventListener("pointercancel", stop);
+  handle.setPointerCapture(event.pointerId);
+}
 
 function render(k) {
   var st = S[k], pane = $("#wrap-" + k); if (!st.got) return;
   var sig = st.cols.map(function (c) { return c.id + c.type; }).join() + "|" + st.rows.map(function (r) { return r.id; }).join();
-  $("#empty-" + k).style.display = st.rows.length ? "none" : "block";
+  var empty = $("#empty-" + k), emptyDisplay = st.rows.length ? "none" : "block";
+  if (empty.style.display !== emptyDisplay) empty.style.display = emptyDisplay;
   if (sig === st.sig) { patch(k); return; }
   st.sig = sig;
   var ae = document.activeElement;
@@ -102,7 +249,18 @@ function render(k) {
     inp.addEventListener("input", function () { c.name = inp.value; later(k + "cols", function () { return saveCols(k); }, 600); });
     var x = editable(h("button", { class: "mini", title: "Delete column", text: "✕" }));
     arm(x, "Sure?", function () { st.cols = st.cols.filter(function (z) { return z.id !== c.id; }); render(k); saveCols(k).catch(fail); });
-    head.append(h("th", {}, [h("div", { class: "hc" }, [inp, x])]));
+    var columnHeader = h("th", { "data-rcol": c.id }, [h("div", { class: "hc" }, [
+      inp, x,
+      h("span", { class: "resize-handle", role: "separator", "aria-label": "Resize column", onpointerdown: function (event) {
+        resizeColumn(k, event.currentTarget, event);
+      } })
+    ])]);
+    var savedWidth = widths[k][c.id];
+    if (savedWidth) {
+      columnHeader.style.width = savedWidth + "px";
+      columnHeader.style.minWidth = savedWidth + "px";
+    }
+    head.append(columnHeader);
   });
   head.append(h("th", { text: "Last edit" }), h("th", { class: "x" }));
   var body = h("tbody");
@@ -117,9 +275,11 @@ function render(k) {
         f.addEventListener("change", function () { saveCell(k, r.id, c.id, f.value, 0); });
       } else {
         f = editable(h("textarea", { rows: "2", "data-r": r.id, "data-c": c.id, "aria-label": c.name })); f.value = r.v[c.id] || "";
-        f.addEventListener("input", function () { size(f); saveCell(k, r.id, c.id, f.value, 600); });
+        f.addEventListener("input", function () { size(f); updatePreview(cell, f.value); saveCell(k, r.id, c.id, f.value, 600); });
       }
-      tr.append(h("td", {}, [f]));
+      var cell = h("td", {}, [f]);
+      if (c.type !== "status") updatePreview(cell, f.value);
+      tr.append(cell);
     });
     tr.append(h("td", { class: "l", "data-by": r.id, text: fmt(r) }));
     var del = editable(h("button", { class: "mini", "data-delete": r.id, text: "Delete" }));
@@ -129,7 +289,11 @@ function render(k) {
     });
     tr.append(h("td", { class: "x" }, [del])); body.append(tr);
   });
-  pane.replaceChildren(h("table", {}, [h("thead", {}, [head]), body]));
+  var table = h("table", {}, [h("thead", {}, [head]), body]);
+  pane.replaceChildren(table);
+  st.cols.forEach(function (c, i) {
+    if (widths[k][c.id]) setTableColumnWidth(table, i + 1, widths[k][c.id]);
+  });
   $$("textarea", pane).forEach(size);
   if (fo) {
     var t = pane.querySelector(fo.hc ? '[data-hc="' + fo.hc + '"]' : '[data-r="' + fo.r + '"][data-c="' + fo.c + '"]');
@@ -140,17 +304,39 @@ function patch(k) {
   var st = S[k], pane = $("#wrap-" + k), ae = document.activeElement;
   st.cols.forEach(function (c) {
     var i = $('[data-hc="' + c.id + '"]', pane);
-    if (i) { i.disabled = !canEdit(); if (i !== ae && i.value !== c.name) i.value = c.name; }
+    if (i) {
+      var headerDisabled = !canEdit();
+      if (i.disabled !== headerDisabled) i.disabled = headerDisabled;
+      if (i !== ae && i.value !== c.name) i.value = c.name;
+    }
   });
   st.rows.forEach(function (r) {
     st.cols.forEach(function (c) {
       var f = $('[data-r="' + r.id + '"][data-c="' + c.id + '"]', pane), v = r.v[c.id] || "";
-      if (f) { f.disabled = !canEdit(); if (f !== ae && f.value !== v) { f.value = v; if (f.tagName === "TEXTAREA") size(f); } }
+      if (f) {
+        var fieldDisabled = !canEdit();
+        if (f.disabled !== fieldDisabled) f.disabled = fieldDisabled;
+        if (f !== ae && f.value !== v) {
+          f.value = v;
+          if (f.tagName === "TEXTAREA") {
+            size(f);
+            updatePreview(f.parentNode, v);
+          }
+        }
+      }
     });
-    var del = $('[data-delete="' + r.id + '"]', pane); if (del) del.disabled = !canEdit();
-    var l = $('[data-by="' + r.id + '"]', pane); if (l) l.textContent = fmt(r);
+    var del = $('[data-delete="' + r.id + '"]', pane);
+    if (del) {
+      var deleteDisabled = !canEdit();
+      if (del.disabled !== deleteDisabled) del.disabled = deleteDisabled;
+    }
+    var l = $('[data-by="' + r.id + '"]', pane), editText = fmt(r);
+    if (l && l.textContent !== editText) l.textContent = editText;
   });
-  $$(".mini", pane).forEach(function (button) { button.disabled = !canEdit(); });
+  var miniDisabled = !canEdit();
+  $$(".mini", pane).forEach(function (button) {
+    if (button.disabled !== miniDisabled) button.disabled = miniDisabled;
+  });
 }
 function refresh() {
   if (loading || pending > 0 || document.hidden) return Promise.resolve();
