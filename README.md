@@ -14,7 +14,8 @@ Google Apps Script backend (Code.gs). No server and no paid services are needed.
 4. **Connect the site.** Open `config.js`, paste the URL into `API_URL`, and put the same secret into `TOKEN`.
 5. **Host the site.** Opening `index.html` directly works for testing. To share it with your four teammates, upload the four
    site files to any static host (GitHub Pages, Netlify Drop, Cloudflare Pages) and send them the link.
-6. Each person types their name in the "Your name" box once. It appears in the "Last edit" column.
+6. Each person types one of these names in the "Your name" box: Mustafa, Zaid, Saleem, Moe, or MKN. Names are
+   case-insensitive. Editing stays disabled until an approved name is entered.
 
 ## How it works
 
@@ -22,6 +23,7 @@ Google Apps Script backend (Code.gs). No server and no paid services are needed.
   chart the data there at any time. Do not rename those tabs. Columns beginning with `_` are used by the site.
 - The page re-reads the sheet every few seconds (`POLL_MS` in config.js), so teammates see each other's changes shortly after they are saved.
 - Adding, renaming or deleting a column in the site updates the sheet header and moves the data accordingly.
+- The approved-name check is enforced in both the page and `Code.gs`, so direct mutation requests are rejected too.
 
 ## Good to know
 

@@ -27,6 +27,17 @@ function note(m, err) { statusEl.textContent = m; statusEl.className = err ? "er
 function fail(e) { note("Couldn’t save that change (" + ((e && e.message) || e) + ").", true); }
 function size(t) { t.style.height = "auto"; t.style.height = t.scrollHeight + "px"; }
 function me() { return (meEl.value || "").trim() || "Someone"; }
+function canEdit() {
+  var name = me().toLowerCase();
+  return (CFG.USERS || []).some(function (user) { return user.toLowerCase() === name; });
+}
+function editable(e) { e.disabled = !canEdit(); return e; }
+function requireEditor() {
+  if (canEdit()) return true;
+  note("Enter one of the approved team member names to edit.", true);
+  meEl.focus();
+  return false;
+}
 
 function api(action, data) {
   var body = Object.assign({ token: CFG.TOKEN, action: action }, data || {});
@@ -50,7 +61,7 @@ function later(key, fn, ms) {
     fn().catch(fail).then(function () { timers[key + "q"] = 0; pending--; });
   }, ms);
 }
-function saveCols(k) { return api("saveCols", { sheet: k, cols: S[k].cols }); }
+function saveCols(k) { return api("saveCols", { sheet: k, cols: S[k].cols, by: me() }); }
 function saveCell(k, rid, cid, val, ms) {
   var row = S[k].rows.find(function (r) { return r.id === rid; }); if (row) row.v[cid] = val;
   later(k + rid + cid, function () { return api("updateCell", { sheet: k, rowId: rid, colId: cid, value: val, by: me() }); }, ms);
@@ -70,9 +81,9 @@ function render(k) {
   var fo = ae && pane.contains(ae) && ae.dataset ? { r: ae.dataset.r, c: ae.dataset.c, hc: ae.dataset.hc, s: ae.selectionStart } : null;
   var head = h("tr", {}, [h("th", { class: "n", text: "#" })]);
   st.cols.forEach(function (c) {
-    var inp = h("input", { class: "h", "data-hc": c.id, "aria-label": "Column name" }); inp.value = c.name;
+    var inp = editable(h("input", { class: "h", "data-hc": c.id, "aria-label": "Column name" })); inp.value = c.name;
     inp.addEventListener("input", function () { c.name = inp.value; later(k + "cols", function () { return saveCols(k); }, 600); });
-    var x = h("button", { class: "mini", title: "Delete column", text: "✕" });
+    var x = editable(h("button", { class: "mini", title: "Delete column", text: "✕" }));
     arm(x, "Sure?", function () { st.cols = st.cols.filter(function (z) { return z.id !== c.id; }); render(k); saveCols(k).catch(fail); });
     head.append(h("th", {}, [h("div", { class: "hc" }, [inp, x])]));
   });
@@ -83,21 +94,21 @@ function render(k) {
     st.cols.forEach(function (c) {
       var f;
       if (c.type === "status") {
-        f = h("select", { "data-r": r.id, "data-c": c.id, "aria-label": c.name });
+        f = editable(h("select", { "data-r": r.id, "data-c": c.id, "aria-label": c.name }));
         [""].concat(STATUS).forEach(function (o) { f.append(h("option", { value: o, text: o || "—" })); });
         f.value = r.v[c.id] || "";
         f.addEventListener("change", function () { saveCell(k, r.id, c.id, f.value, 0); });
       } else {
-        f = h("textarea", { rows: "2", "data-r": r.id, "data-c": c.id, "aria-label": c.name }); f.value = r.v[c.id] || "";
+        f = editable(h("textarea", { rows: "2", "data-r": r.id, "data-c": c.id, "aria-label": c.name })); f.value = r.v[c.id] || "";
         f.addEventListener("input", function () { size(f); saveCell(k, r.id, c.id, f.value, 600); });
       }
       tr.append(h("td", {}, [f]));
     });
     tr.append(h("td", { class: "l", "data-by": r.id, text: fmt(r) }));
-    var del = h("button", { class: "mini", text: "Delete" });
+    var del = editable(h("button", { class: "mini", "data-delete": r.id, text: "Delete" }));
     arm(del, "Sure?", function () {
       st.rows = st.rows.filter(function (z) { return z.id !== r.id; }); render(k);
-      api("deleteRow", { sheet: k, rowId: r.id }).catch(fail);
+      api("deleteRow", { sheet: k, rowId: r.id, by: me() }).catch(fail);
     });
     tr.append(h("td", { class: "x" }, [del])); body.append(tr);
   });
@@ -110,14 +121,19 @@ function render(k) {
 }
 function patch(k) {
   var st = S[k], pane = $("#wrap-" + k), ae = document.activeElement;
-  st.cols.forEach(function (c) { var i = $('[data-hc="' + c.id + '"]', pane); if (i && i !== ae && i.value !== c.name) i.value = c.name; });
+  st.cols.forEach(function (c) {
+    var i = $('[data-hc="' + c.id + '"]', pane);
+    if (i) { i.disabled = !canEdit(); if (i !== ae && i.value !== c.name) i.value = c.name; }
+  });
   st.rows.forEach(function (r) {
     st.cols.forEach(function (c) {
       var f = $('[data-r="' + r.id + '"][data-c="' + c.id + '"]', pane), v = r.v[c.id] || "";
-      if (f && f !== ae && f.value !== v) { f.value = v; if (f.tagName === "TEXTAREA") size(f); }
+      if (f) { f.disabled = !canEdit(); if (f !== ae && f.value !== v) { f.value = v; if (f.tagName === "TEXTAREA") size(f); } }
     });
+    var del = $('[data-delete="' + r.id + '"]', pane); if (del) del.disabled = !canEdit();
     var l = $('[data-by="' + r.id + '"]', pane); if (l) l.textContent = fmt(r);
   });
+  $$(".mini", pane).forEach(function (button) { button.disabled = !canEdit(); });
 }
 function refresh() {
   if (loading || pending > 0 || document.hidden) return Promise.resolve();
@@ -147,16 +163,18 @@ KEYS.concat("guide").forEach(function (k) {
 });
 KEYS.forEach(function (k) {
   var bar = h("div", { class: "bar" }, [
-    h("button", { class: "btn", text: "+ Add row", onclick: function () { api("addRow", { sheet: k, by: me() }).then(refresh).catch(fail); } }),
-    h("button", { class: "btn alt", text: "+ Add column", onclick: function () {
+    editable(h("button", { class: "btn", text: "+ Add row", onclick: function () { if (!requireEditor()) return; api("addRow", { sheet: k, by: me() }).then(refresh).catch(fail); } })),
+    editable(h("button", { class: "btn alt", text: "+ Add column", onclick: function () {
+      if (!requireEditor()) return;
       var c = { id: "c" + Date.now().toString(36), name: "New column", type: "text" };
       S[k].cols.push(c); render(k); saveCols(k).catch(fail);
       var i = $('[data-hc="' + c.id + '"]'); if (i) { i.focus(); i.select(); }
-    } })
+    } }))
   ]);
-  if (SHEETS[k].starter) bar.append(h("button", { class: "btn alt", text: "Add starter criteria", onclick: function () {
+  if (SHEETS[k].starter) bar.append(editable(h("button", { class: "btn alt", text: "Add starter criteria", onclick: function () {
+    if (!requireEditor()) return;
     api("addRows", { sheet: k, by: me(), rows: SHEETS[k].starter.map(function (s) { return { c1: s }; }) }).then(refresh).catch(fail);
-  } }));
+  } })));
   bar.append(h("button", { class: "btn alt", text: "Export CSV", onclick: function () {
     var a = h("a", { href: URL.createObjectURL(new Blob([csv(k)], { type: "text/csv" })), download: "hqnn_" + k + ".csv" });
     document.body.append(a); a.click(); a.remove();
@@ -168,7 +186,11 @@ KEYS.forEach(function (k) {
 show("papers");
 
 meEl.value = localStorage.getItem("hqnn_name") || "";
-meEl.addEventListener("input", function () { try { localStorage.setItem("hqnn_name", meEl.value); } catch (e) {} });
+meEl.addEventListener("input", function () {
+  try { localStorage.setItem("hqnn_name", meEl.value); } catch (e) {}
+  KEYS.forEach(function (k) { render(k); });
+  note(canEdit() ? "Ready to edit as " + me() + "." : "Enter an approved team member name to edit.", !canEdit());
+});
 
 if (!CFG.API_URL || CFG.API_URL.indexOf("PASTE_") === 0) {
   note("Not connected yet. Open config.js and paste your Apps Script web app URL (see README.md).", true);

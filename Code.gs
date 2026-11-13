@@ -3,8 +3,13 @@
  * Setup is in README.md. Tabs "papers", "gaps", "qs" and "_meta" are created automatically.
  */
 var TOKEN = "CHANGE_ME_SECRET"; // must match TOKEN in config.js
+var USERS = ["Mustafa", "Zaid", "Saleem", "Moe", "MKN"];
 
 function doGet() { return out({ ok: true, message: "HQNN workspace API is running." }); }
+function allowedUser(name) {
+  var normalized = String(name || "").trim().toLowerCase();
+  return USERS.some(function (user) { return user.toLowerCase() === normalized; });
+}
 
 function doPost(e) {
   var lock = LockService.getScriptLock(), locked = false;
@@ -13,6 +18,7 @@ function doPost(e) {
     if (r.token !== TOKEN) return out({ error: "Bad token" });
     var fn = A[r.action];
     if (!fn) return out({ error: "Unknown action" });
+    if (r.action !== "getAll" && !allowedUser(r.by)) return out({ error: "Enter an approved team member name before editing." });
     if (r.action !== "getAll") { lock.waitLock(20000); locked = true; }
     return out(fn(SpreadsheetApp.getActiveSpreadsheet(), r));
   } catch (err) {
