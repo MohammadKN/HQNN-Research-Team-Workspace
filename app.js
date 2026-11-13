@@ -9,7 +9,7 @@ var SHEETS = {
     starter: ["Baseline matched and tuned","Realistic noise model","Real-world dataset","Code released","Qubit count beyond toy sizes","Data encoding studied systematically"] },
   qs: { label: "Research Questions", cols: mk([["c1","Research question"],["c2","Why it matters"],["c3","Owner"],["c4","Status","status"]]) }
 };
-var KEYS = Object.keys(SHEETS), S = {}, timers = {}, pending = 0, loading = false;
+var KEYS = Object.keys(SHEETS), S = {}, timers = {}, dirty = {}, pending = 0, loading = false;
 var statusEl = $("#status"), meEl = $("#me");
 KEYS.forEach(function (k) { S[k] = { cols: SHEETS[k].cols.slice(), rows: [], sig: "", got: false }; });
 
@@ -55,16 +55,30 @@ function arm(btn, label, fn) {
 }
 // Debounced save; "pending" pauses polling so a refresh never overwrites unsaved typing.
 function later(key, fn, ms) {
-  clearTimeout(timers[key]);
-  if (!timers[key + "q"]) { timers[key + "q"] = 1; pending++; }
-  timers[key] = setTimeout(function () {
-    fn().catch(fail).then(function () { timers[key + "q"] = 0; pending--; });
+  var old = timers[key];
+  if (old && old.timer) { clearTimeout(old.timer); pending--; }
+  var job = { timer: null };
+  timers[key] = job;
+  pending++;
+  job.timer = setTimeout(function () {
+    job.timer = null;
+    Promise.resolve().then(fn).catch(function (e) { fail(e); }).then(function () {
+      pending--;
+      if (timers[key] === job) delete timers[key];
+    });
   }, ms);
 }
 function saveCols(k) { return api("saveCols", { sheet: k, cols: S[k].cols, by: me() }); }
 function saveCell(k, rid, cid, val, ms) {
+  var key = k + "|" + rid + "|" + cid;
   var row = S[k].rows.find(function (r) { return r.id === rid; }); if (row) row.v[cid] = val;
-  later(k + rid + cid, function () { return api("updateCell", { sheet: k, rowId: rid, colId: cid, value: val, by: me() }); }, ms);
+  dirty[key] = { value: val, at: Date.now() };
+  later(key, function () {
+    return api("updateCell", { sheet: k, rowId: rid, colId: cid, value: val, by: me() }).catch(function (e) {
+      if (dirty[key] && dirty[key].value === val) delete dirty[key];
+      throw e;
+    });
+  }, ms);
 }
 function fmt(r) {
   var d = r.at ? new Date(Number(r.at)).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
@@ -140,7 +154,20 @@ function refresh() {
   loading = true;
   var d = {}; KEYS.forEach(function (k) { d[k] = SHEETS[k].cols; });
   return api("getAll", { defaults: d }).then(function (j) {
-    KEYS.forEach(function (k) { var s = j.sheets[k]; if (!s) return; S[k].cols = s.cols; S[k].rows = s.rows; S[k].got = true; render(k); });
+    KEYS.forEach(function (k) {
+      var s = j.sheets[k]; if (!s) return;
+      s.rows.forEach(function (r) {
+        s.cols.forEach(function (c) {
+          var key = k + "|" + r.id + "|" + c.id, local = dirty[key];
+          if (!local) return;
+          var remote = r.v[c.id] || "";
+          if (remote === local.value) delete dirty[key];
+          else if (Date.now() - local.at < 30000) r.v[c.id] = local.value;
+          else delete dirty[key];
+        });
+      });
+      S[k].cols = s.cols; S[k].rows = s.rows; S[k].got = true; render(k);
+    });
     note("Synced " + new Date().toLocaleTimeString() + " · refreshes every " + Math.round(CFG.POLL_MS / 1000) + "s");
   }).catch(function (e) { note("Can’t reach Google Sheets: " + e.message, true); })
     .then(function () { loading = false; });
