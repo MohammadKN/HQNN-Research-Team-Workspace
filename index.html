@@ -7,22 +7,63 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<h1>HQNN Research Team Workspace</h1>
-<p class="sub">One shared workspace for the whole team, stored in a Google Sheet. Add or rename columns and rows as you go.</p>
-<div class="who"><label for="me">Your name</label><input id="me" type="text" placeholder="Mustafa, Zaid, Saleem, Moe, or MKN" autocomplete="name"></div>
-<div id="status">Connecting…</div>
-<div class="tabs" id="tabs"></div>
-<div id="panes"></div>
-<div class="pane" id="pane-guide">
-<dl>
-<dt>Venue / DOI</dt><dd>Where the paper appeared (journal, conference, arXiv) and its permanent identifier.</dd>
-<dt>Baseline (parameter-matched?)</dt><dd>The classical model the hybrid was compared against, and whether it had a similar number of trainable parameters and equal tuning effort.</dd>
-<dt>Noise Model</dt><dd>Ideal simulator, simulator with noise (name the source), or real hardware (device and shots).</dd>
-<dt>Qubit Count</dt><dd>Largest circuit used in the experiments.</dd>
-<dt>Code Released?</dt><dd>Yes or no, with the repository link.</dd>
-<dt>Limitations</dt><dd>What the authors admit in their limitations or future work section.</dd>
-<dt>Assigned to / Status</dt><dd>Who is reading the paper and how far along they are, so nobody duplicates work.</dd>
-</dl>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="workspace-switcher">
+      <div class="workspace-mark">H</div>
+      <div class="workspace-name">HQNN Research</div>
+      <span class="chevron">⌄</span>
+    </div>
+    <div class="sidebar-actions">
+      <button class="sidebar-action" type="button" aria-label="Search"><span>⌕</span> Search <kbd>⌘ K</kbd></button>
+      <button class="sidebar-action" type="button"><span>⟳</span> Updates</button>
+    </div>
+    <div class="sidebar-section-label">Workspace</div>
+    <nav class="page-tree" aria-label="Workspace pages">
+      <div class="tabs sidebar-tabs" id="tabs"></div>
+    </nav>
+    <div class="sidebar-bottom">
+      <button class="sidebar-action" type="button"><span>?</span> Help &amp; support</button>
+      <div class="profile-row"><div class="avatar">M</div><div><strong>My account</strong><small>Personal settings</small></div><span class="more">•••</span></div>
+    </div>
+  </aside>
+  <main class="main-content">
+    <header class="topbar">
+      <div class="breadcrumbs"><span>HQNN Research</span><b>/</b><strong>Research tasks</strong></div>
+      <div class="top-actions"><button type="button" aria-label="Favorite page">☆</button><button type="button" aria-label="Page comments">◌</button><button type="button" aria-label="More options">•••</button></div>
+    </header>
+    <div class="page-content">
+      <div class="page-heading">
+        <div class="page-emoji">▦</div>
+        <div>
+          <div class="eyebrow">Shared database</div>
+          <h1>Research tasks</h1>
+          <p>Track papers, open questions, and the next steps for the team.</p>
+        </div>
+      </div>
+      <div class="workspace-card">
+        <div class="identity-row">
+          <label for="me">Editing as</label><input id="me" type="text" placeholder="Enter your name" autocomplete="name">
+          <div id="status" role="status">Connecting…</div>
+        </div>
+        <div id="panes"></div>
+        <div class="pane" id="pane-guide">
+          <div class="guide-grid">
+            <div><h3>Database properties</h3><dl>
+              <dt>Venue / DOI</dt><dd>Where the paper appeared and its permanent identifier.</dd>
+              <dt>Baseline</dt><dd>The classical model and whether it was parameter-matched.</dd>
+              <dt>Noise Model</dt><dd>Ideal simulator, noisy simulator, or real hardware.</dd>
+            </dl></div>
+            <div><h3>Team workflow</h3><dl>
+              <dt>Assigned to / Status</dt><dd>Who is reading the paper and how far along they are.</dd>
+              <dt>Code Released?</dt><dd>Whether the authors shared a repository link.</dd>
+              <dt>Limitations</dt><dd>What the authors identify as limitations or future work.</dd>
+            </dl></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
 </div>
 <script src="config.js"></script>
 <script src="app.js"></script>

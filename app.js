@@ -9,7 +9,7 @@ var SHEETS = {
     starter: ["Baseline matched and tuned","Realistic noise model","Real-world dataset","Code released","Qubit count beyond toy sizes","Data encoding studied systematically"] },
   qs: { label: "Research Questions", cols: mk([["c1","Research question"],["c2","Why it matters"],["c3","Owner"],["c4","Status","status"]]) }
 };
-var KEYS = Object.keys(SHEETS), S = {}, timers = {}, dirty = {}, pending = 0, loading = false;
+var KEYS = Object.keys(SHEETS), S = {}, timers = {}, dirty = {}, pending = 0, loading = false, mutationQueues = {}, expandedCells = {};
 var statusEl = $("#status"), meEl = $("#me");
 KEYS.forEach(function (k) { S[k] = { cols: SHEETS[k].cols.slice(), rows: [], sig: "", got: false }; });
 
@@ -26,12 +26,56 @@ function h(tag, a, kids) {
 function note(m, err) { statusEl.textContent = m; statusEl.className = err ? "err" : ""; }
 function fail(e) { note("Couldn’t save that change (" + ((e && e.message) || e) + ").", true); }
 function size(t) { t.style.height = "auto"; t.style.height = t.scrollHeight + "px"; }
+function cellKey(k, rid, cid) { return k + "|" + rid + "|" + cid; }
+function toggleCell(k, rid, cid, field, button) {
+  var key = cellKey(k, rid, cid), expanded = !expandedCells[key];
+  expandedCells[key] = expanded;
+  field.classList.toggle("cell-collapsed", !expanded);
+  button.textContent = expanded ? "Shrink" : "Expand";
+  if (expanded) size(field); else field.style.height = "3.2em";
+}
+function applyCellSizing(k) {
+  var pane = $("#wrap-" + k), rows = {};
+  $$("textarea[data-r]", pane).forEach(function (field) {
+    var row = field.dataset.r, lineHeight = parseFloat(getComputedStyle(field).lineHeight) || 21;
+    var lines = Math.max(1, Math.round(field.scrollHeight / lineHeight));
+    if (!rows[row]) rows[row] = [];
+    rows[row].push({ field: field, lines: lines });
+  });
+  Object.keys(rows).forEach(function (rowId) {
+    var cells = rows[rowId], mean = cells.reduce(function (sum, cell) { return sum + cell.lines; }, 0) / cells.length;
+    cells.forEach(function (cell) {
+      var field = cell.field, cellEl = field.closest("td"), button = $(".cell-toggle", cellEl);
+      var candidate = cell.lines > mean * 2;
+      cellEl.classList.toggle("cell-long", candidate);
+      if (!button) return;
+      button.style.display = candidate ? "inline-flex" : "none";
+      if (!candidate) {
+        delete expandedCells[cellKey(k, rowId, field.dataset.c)];
+        field.classList.remove("cell-collapsed");
+        size(field);
+        return;
+      }
+      var expanded = !!expandedCells[cellKey(k, rowId, field.dataset.c)];
+      field.classList.toggle("cell-collapsed", !expanded);
+      button.textContent = expanded ? "Shrink" : "Expand";
+      if (!expanded) field.style.height = "3.2em";
+    });
+  });
+}
 function me() { return (meEl.value || "").trim() || "Someone"; }
 function canEdit() {
   var name = me().toLowerCase();
   return (CFG.USERS || []).some(function (user) { return user.toLowerCase() === name; });
 }
-function editable(e) { e.disabled = !canEdit(); return e; }
+function editable(e) {
+  e.disabled = !canEdit();
+  e.setAttribute("data-edit-required", "true");
+  return e;
+}
+function syncEditControls() {
+  $$("[data-edit-required]").forEach(function (e) { e.disabled = !canEdit(); });
+}
 function requireEditor() {
   if (canEdit()) return true;
   note("Enter one of the approved team member names to edit.", true);
@@ -134,15 +178,8 @@ function preview(value) {
   });
 }
 function websitePreview(url) {
-  var frame = h("iframe", {
-    src: url,
-    title: "Website quick look",
-    loading: "lazy",
-    referrerpolicy: "no-referrer",
-    sandbox: "allow-forms allow-popups allow-scripts"
-  });
   var link = h("a", { href: url, target: "_blank", rel: "noopener noreferrer", text: "Open link" });
-  return h("div", { class: "website-preview" }, [frame, link]);
+  return h("div", { class: "website-preview" }, [link]);
 }
 function updatePreview(cell, value) {
   var urls = linkUrls(value), key = urls.join("\n");
@@ -192,7 +229,25 @@ function later(key, fn, ms) {
     });
   }, ms);
 }
-function saveCols(k) { return api("saveCols", { sheet: k, cols: S[k].cols, by: me() }); }
+function queueMutation(k, work) {
+  var previous = mutationQueues[k] || Promise.resolve();
+  var current = previous.catch(function () {}).then(work);
+  mutationQueues[k] = current;
+  current.then(function () {
+    if (mutationQueues[k] === current) delete mutationQueues[k];
+  }, function () {
+    if (mutationQueues[k] === current) delete mutationQueues[k];
+  });
+  return current;
+}
+function saveCols(k, cols) {
+  var snapshot = (cols || S[k].cols).map(function (c) {
+    return { id: c.id, name: c.name, type: c.type };
+  });
+  return queueMutation(k, function () {
+    return api("saveCols", { sheet: k, cols: snapshot, by: me() });
+  });
+}
 function saveCell(k, rid, cid, val, ms) {
   var key = k + "|" + rid + "|" + cid;
   var row = S[k].rows.find(function (r) { return r.id === rid; }); if (row) row.v[cid] = val;
@@ -213,15 +268,15 @@ function fmt(r) {
 }
 
 function render(k) {
-  var st = S[k], pane = $("#wrap-" + k); if (!st.got) return;
+  var st = S[k], pane = $("#wrap-" + k), headerPane = $("#head-" + k); if (!st.got) return;
   var sig = st.cols.map(function (c) { return c.id + c.type; }).join() + "|" + st.rows.map(function (r) { return r.id; }).join();
   var empty = $("#empty-" + k), emptyDisplay = st.rows.length ? "none" : "block";
   if (empty.style.display !== emptyDisplay) empty.style.display = emptyDisplay;
   if (sig === st.sig) { patch(k); return; }
   st.sig = sig;
-  var ae = document.activeElement;
-  var fo = ae && pane.contains(ae) && ae.dataset ? { r: ae.dataset.r, c: ae.dataset.c, hc: ae.dataset.hc, s: ae.selectionStart } : null;
-  var head = h("tr", {}, [h("th", { class: "n", text: "#" })]);
+  var ae = document.activeElement, renderArea = $("#pane-" + k);
+  var fo = ae && renderArea.contains(ae) && ae.dataset ? { r: ae.dataset.r, c: ae.dataset.c, hc: ae.dataset.hc, s: ae.selectionStart } : null;
+  var head = h("tr", {}, [h("th", { class: "n", text: " " })]);
   st.cols.forEach(function (c) {
     var inp = editable(h("input", { class: "h", "data-hc": c.id, "aria-label": "Column name" })); inp.value = c.name;
     inp.addEventListener("input", function () { c.name = inp.value; later(k + "cols", function () { return saveCols(k); }, 600); });
@@ -229,7 +284,7 @@ function render(k) {
     arm(x, "Sure?", function () { st.cols = st.cols.filter(function (z) { return z.id !== c.id; }); render(k); saveCols(k).catch(fail); });
     head.append(h("th", {}, [h("div", { class: "hc" }, [inp, x])]));
   });
-  head.append(h("th", { text: "Last edit" }), h("th", { class: "x" }));
+  head.append(h("th", { class: "l", text: "Last edited" }), h("th", { class: "x", text: " " }));
   var body = h("tbody");
   st.rows.forEach(function (r, i) {
     var tr = h("tr", {}, [h("td", { class: "n", text: String(i + 1) })]);
@@ -242,9 +297,23 @@ function render(k) {
         f.addEventListener("change", function () { saveCell(k, r.id, c.id, f.value, 0); });
       } else {
         f = editable(h("textarea", { rows: "2", "data-r": r.id, "data-c": c.id, "aria-label": c.name })); f.value = r.v[c.id] || "";
-        f.addEventListener("input", function () { size(f); updatePreview(cell, f.value); saveCell(k, r.id, c.id, f.value, 600); });
+        f.addEventListener("input", function () { size(f); updatePreview(cell, f.value); applyCellSizing(k); saveCell(k, r.id, c.id, f.value, 600); });
       }
-      var cell = h("td", {}, [f]);
+      if (r.pending) {
+        f.disabled = true;
+        f.title = "Saving this row…";
+      }
+      var toggle = c.type === "status" ? null : h("button", {
+        class: "cell-toggle",
+        type: "button",
+        text: "Expand",
+        onclick: function (event) { event.stopPropagation(); toggleCell(k, r.id, c.id, f, toggle); }
+      });
+      var editor = c.type === "status" ? f : h("div", {
+        class: "cell-editor",
+        ondblclick: function () { toggleCell(k, r.id, c.id, f, toggle); }
+      }, [f, toggle]);
+      var cell = h("td", {}, [editor]);
       if (c.type !== "status") updatePreview(cell, f.value);
       tr.append(cell);
     });
@@ -256,17 +325,24 @@ function render(k) {
     });
     tr.append(h("td", { class: "x" }, [del])); body.append(tr);
   });
-  pane.replaceChildren(h("table", {}, [h("thead", {}, [head]), body]));
+  var columnWidths = [38].concat(st.cols.map(function () { return 180; }), [145, 57]);
+  var tableWidth = columnWidths.reduce(function (sum, width) { return sum + width; }, 0);
+  var columns = columnWidths.map(function (width) { return h("col", { style: "width:" + width + "px" }); });
+  var colgroup = h("colgroup", {}, columns);
+  headerPane.replaceChildren(h("table", { style: "width:" + tableWidth + "px" }, [colgroup.cloneNode(true), h("thead", {}, [head])]));
+  pane.replaceChildren(h("table", { style: "width:" + tableWidth + "px" }, [colgroup, body]));
+  syncTableHeader(k);
   $$("textarea", pane).forEach(size);
+  applyCellSizing(k);
   if (fo) {
-    var t = pane.querySelector(fo.hc ? '[data-hc="' + fo.hc + '"]' : '[data-r="' + fo.r + '"][data-c="' + fo.c + '"]');
+    var t = renderArea.querySelector(fo.hc ? '[data-hc="' + fo.hc + '"]' : '[data-r="' + fo.r + '"][data-c="' + fo.c + '"]');
     if (t) { t.focus(); try { t.setSelectionRange(fo.s, fo.s); } catch (e) {} }
   }
 }
 function patch(k) {
-  var st = S[k], pane = $("#wrap-" + k), ae = document.activeElement;
+  var st = S[k], pane = $("#wrap-" + k), headerPane = $("#head-" + k), ae = document.activeElement;
   st.cols.forEach(function (c) {
-    var i = $('[data-hc="' + c.id + '"]', pane);
+    var i = $('[data-hc="' + c.id + '"]', headerPane);
     if (i) {
       var headerDisabled = !canEdit();
       if (i.disabled !== headerDisabled) i.disabled = headerDisabled;
@@ -277,7 +353,7 @@ function patch(k) {
     st.cols.forEach(function (c) {
       var f = $('[data-r="' + r.id + '"][data-c="' + c.id + '"]', pane), v = r.v[c.id] || "";
       if (f) {
-        var fieldDisabled = !canEdit();
+        var fieldDisabled = !canEdit() || r.pending;
         if (f.disabled !== fieldDisabled) f.disabled = fieldDisabled;
         if (f !== ae && f.value !== v) {
           f.value = v;
@@ -297,9 +373,11 @@ function patch(k) {
     if (l && l.textContent !== editText) l.textContent = editText;
   });
   var miniDisabled = !canEdit();
-  $$(".mini", pane).forEach(function (button) {
+  $$(".mini", pane).concat($$(".mini", headerPane)).forEach(function (button) {
     if (button.disabled !== miniDisabled) button.disabled = miniDisabled;
   });
+  applyCellSizing(k);
+  syncTableHeader(k);
 }
 function refresh() {
   if (loading || pending > 0 || document.hidden) return Promise.resolve();
@@ -308,6 +386,10 @@ function refresh() {
   return api("getAll", { defaults: d }).then(function (j) {
     KEYS.forEach(function (k) {
       var s = j.sheets[k]; if (!s) return;
+      var pendingRows = S[k].rows.filter(function (r) { return r.pending; });
+      pendingRows.forEach(function (pendingRow) {
+        if (!s.rows.some(function (r) { return r.id === pendingRow.id; })) s.rows.push(pendingRow);
+      });
       s.rows.forEach(function (r) {
         s.cols.forEach(function (c) {
           var key = k + "|" + r.id + "|" + c.id, local = dirty[key];
@@ -335,39 +417,147 @@ function show(id) {
   $$("#tabs button").forEach(function (b) { b.classList.toggle("on", b.dataset.t === id); });
   $$("#pane-" + id + " textarea").forEach(size);
 }
+function scrollTable(k, columns) {
+  var wrap = $("#wrap-" + k), headerTable = $("#head-" + k + " table");
+  if (!wrap || !headerTable) return;
+
+  var headerCells = $$("th", headerTable);
+  var targets = [0];
+  headerCells.forEach(function (cell) {
+    if (cell.offsetLeft > 0) targets.push(cell.offsetLeft);
+  });
+  targets = targets.filter(function (target, index) {
+    return index === 0 || target !== targets[index - 1];
+  });
+
+  var max = Math.max(0, wrap.scrollWidth - wrap.clientWidth);
+  var current = wrap.scrollLeft;
+  var target;
+
+  if (columns === "end") {
+    target = max;
+  } else if (columns === "start") {
+    target = 0;
+  } else if (columns > 0) {
+    target = targets.find(function (position) { return position > current + 1; }) || max;
+    if (columns > 1) {
+      var currentIndex = targets.reduce(function (nearest, position, index) {
+        return position <= current + 1 ? index : nearest;
+      }, 0);
+      target = targets[Math.min(targets.length - 1, currentIndex + columns)] || max;
+    }
+  } else {
+    var leftCount = Math.abs(columns);
+    var currentIndex = targets.reduce(function (nearest, position, index) {
+      return position <= current + 1 ? index : nearest;
+    }, 0);
+    target = targets[Math.max(0, currentIndex - leftCount)] || 0;
+  }
+
+  target = Math.max(0, Math.min(max, target));
+  wrap.scrollTo({ left: target, behavior: "smooth" });
+}
+function syncTableHeader(k) {
+  var paneRoot = $("#pane-" + k), wrap = $("#wrap-" + k), header = $("#head-" + k), table = $("table", header), bar = $(".bar", paneRoot), identity = $(".identity-row");
+  if (!paneRoot || !wrap || !header || !table || !bar || !identity) return;
+  paneRoot.style.setProperty("--identity-height", identity.offsetHeight + "px");
+  paneRoot.style.setProperty("--bar-height", bar.offsetHeight + "px");
+  table.style.transform = "translateX(" + (-wrap.scrollLeft) + "px)";
+}
+window.addEventListener("resize", function () {
+  var active = $(".pane.on");
+  if (!active) return;
+  var k = active.id.replace(/^pane-/, "");
+  if (KEYS.indexOf(k) !== -1) syncTableHeader(k);
+});
 
 var tabs = $("#tabs"), panes = $("#panes");
 KEYS.concat("guide").forEach(function (k) {
   tabs.append(h("button", { "data-t": k, text: k === "guide" ? "Column Guide" : SHEETS[k].label, onclick: function () { show(k); } }));
 });
 KEYS.forEach(function (k) {
-  var bar = h("div", { class: "bar" }, [
-    editable(h("button", { class: "btn", text: "+ Add row", onclick: function () { if (!requireEditor()) return; api("addRow", { sheet: k, by: me() }).then(refresh).catch(fail); } })),
-    editable(h("button", { class: "btn alt", text: "+ Add column", onclick: function () {
-      if (!requireEditor()) return;
-      var c = { id: "c" + Date.now().toString(36), name: "New column", type: "text" };
-      S[k].cols.push(c); render(k); saveCols(k).catch(fail);
-      var i = $('[data-hc="' + c.id + '"]'); if (i) { i.focus(); i.select(); }
-    } }))
+  var addingRow = false, addingColumn = false;
+  var addRowButton, addColumnButton;
+  var centerControls = h("div", { class: "center-controls" });
+  var leftControls = h("div", { class: "scroll-controls nav-left", role: "group", "aria-label": "Scroll table left" }, [
+    h("button", { type: "button", title: "Scroll to the beginning", text: "Start", onclick: function () { scrollTable(k, "start"); } }),
+    h("button", { type: "button", title: "Scroll five columns left", text: "« 5 cols", onclick: function () { scrollTable(k, -5); } }),
+    h("button", { type: "button", title: "Scroll one column left", text: "‹ 1 col", onclick: function () { scrollTable(k, -1); } })
   ]);
-  if (SHEETS[k].starter) bar.append(editable(h("button", { class: "btn alt", text: "Add starter criteria", onclick: function () {
+  var rightControls = h("div", { class: "scroll-controls nav-right", role: "group", "aria-label": "Scroll table right" }, [
+    h("button", { type: "button", title: "Scroll one column right", text: "1 col ›", onclick: function () { scrollTable(k, 1); } }),
+    h("button", { type: "button", title: "Scroll five columns right", text: "5 cols »", onclick: function () { scrollTable(k, 5); } }),
+    h("button", { type: "button", title: "Scroll to the end", text: "End", onclick: function () { scrollTable(k, "end"); } })
+  ]);
+  var bar = h("div", { class: "bar" }, [leftControls, centerControls, rightControls]);
+  centerControls.append(
+    addRowButton = editable(h("button", { class: "btn", text: "+ Add row", onclick: function () {
+      if (addingRow || !requireEditor()) return;
+      addingRow = true; addRowButton.disabled = true; addRowButton.textContent = "Adding…";
+      var pendingId = "__pending_" + Date.now().toString(36);
+      var pendingRow = { id: pendingId, by: me(), at: Date.now(), edits: [], v: {}, pending: true };
+      S[k].cols.forEach(function (c) { pendingRow.v[c.id] = ""; });
+      S[k].rows.push(pendingRow); S[k].sig = ""; render(k);
+      note("Saving new row…");
+      api("addRow", { sheet: k, by: me() }).then(function (result) {
+        if (!result || !result.id) throw new Error("The server did not return the new row.");
+        var row = S[k].rows.find(function (r) { return r.id === pendingId; });
+        if (row) { row.id = result.id; row.pending = false; row.edits = [{ by: me(), at: Date.now() }]; }
+        S[k].sig = ""; render(k);
+        return refresh();
+      }).then(function () {
+        note("Row added.");
+      }).catch(function (e) {
+        S[k].rows = S[k].rows.filter(function (r) { return r.id !== pendingId; });
+        S[k].sig = ""; render(k); fail(e);
+      }).then(function () {
+        addingRow = false; addRowButton.textContent = "+ Add row"; syncEditControls();
+      });
+    } })),
+    addColumnButton = editable(h("button", { class: "btn alt", text: "+ Add column", onclick: function () {
+      if (addingColumn || !requireEditor()) return;
+      addingColumn = true; addColumnButton.disabled = true; addColumnButton.textContent = "Adding…";
+      var previous = S[k].cols.slice();
+      var c = { id: "c" + Date.now().toString(36), name: "New column", type: "text" };
+      var next = previous.concat([c]);
+      S[k].cols = next; S[k].sig = ""; render(k);
+      var i = $('[data-hc="' + c.id + '"]'); if (i) { i.focus(); i.select(); }
+      note("Adding a column…");
+      saveCols(k, next).then(function () {
+        return refresh();
+      }).then(function () {
+        note("Column added.");
+      }).catch(function (e) {
+        S[k].cols = previous; S[k].sig = ""; render(k); fail(e);
+      }).then(function () {
+        addingColumn = false; addColumnButton.textContent = "+ Add column"; syncEditControls();
+      });
+    } }))
+  );
+  if (SHEETS[k].starter) centerControls.append(editable(h("button", { class: "btn alt", text: "Add starter criteria", onclick: function () {
     if (!requireEditor()) return;
     api("addRows", { sheet: k, by: me(), rows: SHEETS[k].starter.map(function (s) { return { c1: s }; }) }).then(refresh).catch(fail);
   } })));
-  bar.append(h("button", { class: "btn alt", text: "Export CSV", onclick: function () {
+  centerControls.append(h("button", { class: "btn alt", text: "Export CSV", onclick: function () {
     var a = h("a", { href: URL.createObjectURL(new Blob([csv(k)], { type: "text/csv" })), download: "hqnn_" + k + ".csv" });
     document.body.append(a); a.click(); a.remove();
   } }));
-  panes.append(h("div", { class: "pane", id: "pane-" + k }, [bar, h("div", { class: "wrap", id: "wrap-" + k }),
-    h("div", { class: "empty", id: "empty-" + k, text: "No rows yet. Click “Add row” to start." })]));
+  var pane = h("div", { class: "pane", id: "pane-" + k }, [
+    bar,
+    h("div", { class: "table-header", id: "head-" + k }),
+    h("div", { class: "wrap", id: "wrap-" + k, onscroll: function () { syncTableHeader(k); } }),
+    h("div", { class: "empty", id: "empty-" + k, text: "No rows yet. Click “Add row” to start." })]);
+  panes.append(pane);
   $("#empty-" + k).style.display = "none";
 });
 show("papers");
 
 meEl.value = localStorage.getItem("hqnn_name") || "";
+syncEditControls();
 meEl.addEventListener("input", function () {
   try { localStorage.setItem("hqnn_name", meEl.value); } catch (e) {}
   KEYS.forEach(function (k) { render(k); });
+  syncEditControls();
   note(canEdit() ? "Ready to edit as " + me() + "." : "Enter an approved team member name to edit.", !canEdit());
 });
 
