@@ -4,7 +4,6 @@
  */
 var TOKEN = "CHANGE_ME_SECRET"; // must match TOKEN in config.js
 var USERS = ["Mustafa", "Zaid", "Saleem", "Moe", "MKN"];
-var MIN_DATA_ROWS = 20;
 
 function doGet() { return out({ ok: true, message: "HQNN workspace API is running." }); }
 function allowedUser(name) {
@@ -81,21 +80,10 @@ function rowIndex(t, id) {
 function newRow(cols, id, by, vals) {
   return [id, by || "", Date.now()].concat(cols.map(function (c) { return (vals && vals[c.id]) || ""; }));
 }
-function emptyRow(cols, id) {
-  return [id, "", ""].concat(cols.map(function () { return ""; }));
-}
 function appendRows(t, rows) {
   var at = t.getLastRow() + 1;
   t.getRange(at, 1, rows.length, rows[0].length).setNumberFormat("@").setValues(rows);
 }
-function ensureMinimumRows(t, cols) {
-  var count = Math.max(0, t.getLastRow() - 1), missing = MIN_DATA_ROWS - count;
-  if (missing <= 0) return;
-  var rows = [];
-  for (var i = 0; i < missing; i++) rows.push(emptyRow(cols, Utilities.getUuid().slice(0, 8)));
-  appendRows(t, rows);
-}
-
 var A = {
   getAll: function (ss, r) {
     var res = {}, history = editHistory(ss);
@@ -103,7 +91,6 @@ var A = {
       var cols = getCols(ss, key);
       if (!cols) { cols = r.defaults[key]; setCols(ss, key, cols); }
       var t = tab(ss, key, cols), rows = [];
-      ensureMinimumRows(t, cols);
       var n = t.getLastRow();
       if (n > 1) {
         t.getRange(2, 1, n - 1, 3 + cols.length).getValues().forEach(function (row) {

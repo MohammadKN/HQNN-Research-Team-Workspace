@@ -66,7 +66,22 @@ function applyCellSizing(k) {
 function me() { return (meEl.value || "").trim() || "Someone"; }
 function canEdit() {
   var name = me().toLowerCase();
-  return (CFG.USERS || []).some(function (user) { return user.toLowerCase() === name; });
+  return isAdmin() || (CFG.USERS || []).some(function (user) { return user.toLowerCase() === name; });
+}
+function isAdmin() {
+  var name = me().toLowerCase();
+  return (CFG.ADMINS || []).some(function (user) { return user.toLowerCase() === name; });
+}
+function backendUser() {
+  if (!isAdmin()) return me();
+  return (CFG.USERS || []).find(function (user) {
+    return ["mkn", "mustafa", "zaid", "saleem", "moe"].indexOf(user.toLowerCase()) !== -1;
+  }) || "MKN";
+}
+function adminEditable(e) {
+  e.disabled = !isAdmin();
+  e.setAttribute("data-admin-required", "true");
+  return e;
 }
 function editable(e) {
   e.disabled = !canEdit();
@@ -74,13 +89,77 @@ function editable(e) {
   return e;
 }
 function syncEditControls() {
+  document.documentElement.classList.toggle("admin-mode", isAdmin());
   $$("[data-edit-required]").forEach(function (e) { e.disabled = !canEdit(); });
+  $$("[data-admin-required]").forEach(function (e) { e.disabled = !isAdmin(); });
 }
 function requireEditor() {
   if (canEdit()) return true;
   note("Enter one of the approved team member names to edit.", true);
   meEl.focus();
   return false;
+}
+function requireAdmin() {
+  if (isAdmin()) return true;
+  note("Admin permission is required.", true);
+  meEl.focus();
+  return false;
+}
+function parseCSV(text) {
+  var rows = [], row = [], value = "", quoted = false;
+  for (var i = 0; i < text.length; i++) {
+    var ch = text[i], next = text[i + 1];
+    if (ch === '"' ) {
+      if (quoted && next === '"') { value += '"'; i++; }
+      else quoted = !quoted;
+    } else if (ch === "," && !quoted) {
+      row.push(value.trim()); value = "";
+    } else if ((ch === "\n" || ch === "\r") && !quoted) {
+      if (ch === "\r" && next === "\n") i++;
+      row.push(value.trim());
+      if (row.some(function (cell) { return cell !== ""; })) rows.push(row);
+      row = []; value = "";
+    } else {
+      value += ch;
+    }
+  }
+  if (value !== "" || row.length) {
+    row.push(value.trim());
+    if (row.some(function (cell) { return cell !== ""; })) rows.push(row);
+  }
+  return rows;
+}
+function openCsvRowDialog(k) {
+  if (!requireAdmin()) return;
+  var overlay = h("div", { class: "csv-dialog-overlay", role: "presentation" });
+  var cols = S[k].cols;
+  var header = cols.map(function (c) { return c.name; }).join(", ");
+  var field = h("textarea", { class: "csv-dialog-text", "aria-label": "CSV row", placeholder: "Paper name,Venue,Architecture" });
+  var form = h("div", { class: "csv-dialog", role: "dialog", "aria-modal": "true", "aria-label": "Add row from CSV" }, [
+    h("h2", { text: "Add row from CSV" }),
+    h("p", { text: "Enter values in column order: " + header }),
+    field,
+    h("div", { class: "csv-dialog-actions" }, [
+      h("button", { type: "button", class: "btn alt", text: "Cancel", onclick: function () { overlay.remove(); } }),
+      h("button", { type: "button", class: "btn", text: "Add row", onclick: function () {
+        var parsed = parseCSV(field.value);
+        if (!parsed.length) { field.focus(); note("Paste at least one CSV row.", true); return; }
+        var values = parsed[0];
+        var row = {};
+        cols.forEach(function (c, index) { row[c.id] = values[index] || ""; });
+        overlay.remove();
+        note("Adding CSV row…");
+        api("addRow", { sheet: k, by: backendUser(), values: row }).then(function (result) {
+          if (!result || !result.id) throw new Error("The server did not return the new row.");
+          note("CSV row added."); return refresh();
+        }).catch(fail);
+      } })
+    ])
+  ]);
+  overlay.append(form);
+  overlay.addEventListener("click", function (event) { if (event.target === overlay) overlay.remove(); });
+  document.body.append(overlay);
+  field.focus();
 }
 function imageUrl(value) {
   var url = String(value || "").trim();
@@ -245,7 +324,7 @@ function saveCols(k, cols) {
     return { id: c.id, name: c.name, type: c.type };
   });
   return queueMutation(k, function () {
-    return api("saveCols", { sheet: k, cols: snapshot, by: me() });
+    return api("saveCols", { sheet: k, cols: snapshot, by: backendUser() });
   });
 }
 function saveCell(k, rid, cid, val, ms) {
@@ -253,7 +332,7 @@ function saveCell(k, rid, cid, val, ms) {
   var row = S[k].rows.find(function (r) { return r.id === rid; }); if (row) row.v[cid] = val;
   dirty[key] = { value: val, at: Date.now() };
   later(key, function () {
-    return api("updateCell", { sheet: k, rowId: rid, colId: cid, value: val, by: me() }).catch(function (e) {
+    return api("updateCell", { sheet: k, rowId: rid, colId: cid, value: val, by: backendUser() }).catch(function (e) {
       if (dirty[key] && dirty[key].value === val) delete dirty[key];
       throw e;
     });
@@ -278,9 +357,9 @@ function render(k) {
   var fo = ae && renderArea.contains(ae) && ae.dataset ? { r: ae.dataset.r, c: ae.dataset.c, hc: ae.dataset.hc, s: ae.selectionStart } : null;
   var head = h("tr", {}, [h("th", { class: "n", text: " " })]);
   st.cols.forEach(function (c) {
-    var inp = editable(h("input", { class: "h", "data-hc": c.id, "aria-label": "Column name" })); inp.value = c.name;
+    var inp = adminEditable(h("input", { class: "h", "data-hc": c.id, "aria-label": "Column name" })); inp.value = c.name;
     inp.addEventListener("input", function () { c.name = inp.value; later(k + "cols", function () { return saveCols(k); }, 600); });
-    var x = editable(h("button", { class: "mini", title: "Delete column", text: "✕" }));
+    var x = adminEditable(h("button", { class: "mini", title: "Delete column", text: "✕" }));
     arm(x, "Sure?", function () { st.cols = st.cols.filter(function (z) { return z.id !== c.id; }); render(k); saveCols(k).catch(fail); });
     head.append(h("th", {}, [h("div", { class: "hc" }, [inp, x])]));
   });
@@ -318,10 +397,11 @@ function render(k) {
       tr.append(cell);
     });
     tr.append(h("td", { class: "l", "data-by": r.id, text: fmt(r) }));
-    var del = editable(h("button", { class: "mini", "data-delete": r.id, text: "Delete" }));
+    var del = adminEditable(h("button", { class: "mini", "data-delete": r.id, text: "Delete" }));
     arm(del, "Sure?", function () {
+      if (!requireAdmin()) return;
       st.rows = st.rows.filter(function (z) { return z.id !== r.id; }); render(k);
-      api("deleteRow", { sheet: k, rowId: r.id, by: me() }).catch(fail);
+      api("deleteRow", { sheet: k, rowId: r.id, by: backendUser() }).catch(fail);
     });
     tr.append(h("td", { class: "x" }, [del])); body.append(tr);
   });
@@ -344,7 +424,7 @@ function patch(k) {
   st.cols.forEach(function (c) {
     var i = $('[data-hc="' + c.id + '"]', headerPane);
     if (i) {
-      var headerDisabled = !canEdit();
+      var headerDisabled = !isAdmin();
       if (i.disabled !== headerDisabled) i.disabled = headerDisabled;
       if (i !== ae && i.value !== c.name) i.value = c.name;
     }
@@ -366,13 +446,13 @@ function patch(k) {
     });
     var del = $('[data-delete="' + r.id + '"]', pane);
     if (del) {
-      var deleteDisabled = !canEdit();
+      var deleteDisabled = !isAdmin();
       if (del.disabled !== deleteDisabled) del.disabled = deleteDisabled;
     }
     var l = $('[data-by="' + r.id + '"]', pane), editText = fmt(r);
     if (l && l.textContent !== editText) l.textContent = editText;
   });
-  var miniDisabled = !canEdit();
+  var miniDisabled = !isAdmin();
   $$(".mini", pane).concat($$(".mini", headerPane)).forEach(function (button) {
     if (button.disabled !== miniDisabled) button.disabled = miniDisabled;
   });
@@ -400,7 +480,11 @@ function refresh() {
           else delete dirty[key];
         });
       });
-      S[k].cols = s.cols; S[k].rows = s.rows; S[k].got = true; render(k);
+      var remoteSig = JSON.stringify({ cols: s.cols, rows: s.rows });
+      if (remoteSig !== S[k].remoteSig) {
+        S[k].remoteSig = remoteSig;
+        S[k].cols = s.cols; S[k].rows = s.rows; S[k].got = true; render(k);
+      }
     });
     note("Synced " + new Date().toLocaleTimeString() + " · refreshes every " + Math.round(CFG.POLL_MS / 1000) + "s");
   }).catch(function (e) { note("Can’t reach Google Sheets: " + e.message, true); })
@@ -495,14 +579,14 @@ KEYS.forEach(function (k) {
       if (addingRow || !requireEditor()) return;
       addingRow = true; addRowButton.disabled = true; addRowButton.textContent = "Adding…";
       var pendingId = "__pending_" + Date.now().toString(36);
-      var pendingRow = { id: pendingId, by: me(), at: Date.now(), edits: [], v: {}, pending: true };
+      var pendingRow = { id: pendingId, by: backendUser(), at: Date.now(), edits: [], v: {}, pending: true };
       S[k].cols.forEach(function (c) { pendingRow.v[c.id] = ""; });
       S[k].rows.push(pendingRow); S[k].sig = ""; render(k);
       note("Saving new row…");
-      api("addRow", { sheet: k, by: me() }).then(function (result) {
+      api("addRow", { sheet: k, by: backendUser() }).then(function (result) {
         if (!result || !result.id) throw new Error("The server did not return the new row.");
         var row = S[k].rows.find(function (r) { return r.id === pendingId; });
-        if (row) { row.id = result.id; row.pending = false; row.edits = [{ by: me(), at: Date.now() }]; }
+        if (row) { row.id = result.id; row.pending = false; row.edits = [{ by: backendUser(), at: Date.now() }]; }
         S[k].sig = ""; render(k);
         return refresh();
       }).then(function () {
@@ -514,7 +598,8 @@ KEYS.forEach(function (k) {
         addingRow = false; addRowButton.textContent = "+ Add row"; syncEditControls();
       });
     } })),
-    addColumnButton = editable(h("button", { class: "btn alt", text: "+ Add column", onclick: function () {
+    adminEditable(h("button", { class: "btn alt", text: "Add row from CSV", onclick: function () { openCsvRowDialog(k); } })),
+    addColumnButton = adminEditable(h("button", { class: "btn alt", text: "+ Add column", onclick: function () {
       if (addingColumn || !requireEditor()) return;
       addingColumn = true; addColumnButton.disabled = true; addColumnButton.textContent = "Adding…";
       var previous = S[k].cols.slice();
@@ -534,9 +619,9 @@ KEYS.forEach(function (k) {
       });
     } }))
   );
-  if (SHEETS[k].starter) centerControls.append(editable(h("button", { class: "btn alt", text: "Add starter criteria", onclick: function () {
+  if (SHEETS[k].starter) centerControls.append(adminEditable(h("button", { class: "btn alt", text: "Add starter criteria", onclick: function () {
     if (!requireEditor()) return;
-    api("addRows", { sheet: k, by: me(), rows: SHEETS[k].starter.map(function (s) { return { c1: s }; }) }).then(refresh).catch(fail);
+    api("addRows", { sheet: k, by: backendUser(), rows: SHEETS[k].starter.map(function (s) { return { c1: s }; }) }).then(refresh).catch(fail);
   } })));
   centerControls.append(h("button", { class: "btn alt", text: "Export CSV", onclick: function () {
     var a = h("a", { href: URL.createObjectURL(new Blob([csv(k)], { type: "text/csv" })), download: "hqnn_" + k + ".csv" });
@@ -558,7 +643,7 @@ meEl.addEventListener("input", function () {
   try { localStorage.setItem("hqnn_name", meEl.value); } catch (e) {}
   KEYS.forEach(function (k) { render(k); });
   syncEditControls();
-  note(canEdit() ? "Ready to edit as " + me() + "." : "Enter an approved team member name to edit.", !canEdit());
+  note(isAdmin() ? "Ready as admin " + me() + "." : canEdit() ? "Ready to add rows as " + me() + "." : "Enter an approved team member name.", !canEdit() && !isAdmin());
 });
 
 if (!CFG.API_URL || CFG.API_URL.indexOf("PASTE_") === 0) {
