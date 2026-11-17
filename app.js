@@ -9,9 +9,9 @@ var SHEETS = {
     starter: ["Baseline matched and tuned","Realistic noise model","Real-world dataset","Code released","Qubit count beyond toy sizes","Data encoding studied systematically"] },
   qs: { label: "Research Questions", cols: mk([["c1","Research question"],["c2","Why it matters"],["c3","Owner"],["c4","Status","status"]]) }
 };
-var KEYS = Object.keys(SHEETS), S = {}, widths = {}, timers = {}, dirty = {}, pending = 0, loading = false;
+var KEYS = Object.keys(SHEETS), S = {}, timers = {}, dirty = {}, pending = 0, loading = false;
 var statusEl = $("#status"), meEl = $("#me");
-KEYS.forEach(function (k) { S[k] = { cols: SHEETS[k].cols.slice(), rows: [], sig: "", got: false }; widths[k] = {}; });
+KEYS.forEach(function (k) { S[k] = { cols: SHEETS[k].cols.slice(), rows: [], sig: "", got: false }; });
 
 function $(s, r) { return (r || document).querySelector(s); }
 function $$(s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); }
@@ -134,8 +134,15 @@ function preview(value) {
   });
 }
 function websitePreview(url) {
+  var frame = h("iframe", {
+    src: url,
+    title: "Website quick look",
+    loading: "lazy",
+    referrerpolicy: "no-referrer",
+    sandbox: "allow-forms allow-popups allow-scripts"
+  });
   var link = h("a", { href: url, target: "_blank", rel: "noopener noreferrer", text: "Open link" });
-  return h("div", { class: "website-preview" }, [link]);
+  return h("div", { class: "website-preview" }, [frame, link]);
 }
 function updatePreview(cell, value) {
   var urls = linkUrls(value), key = urls.join("\n");
@@ -204,35 +211,6 @@ function fmt(r) {
     return edit.by && d ? edit.by + " · " + d : (edit.by || d);
   }).join("\n");
 }
-function setTableColumnWidth(table, index, width) {
-  Array.prototype.forEach.call(table.rows, function (row) {
-    if (row.cells[index]) {
-      row.cells[index].style.width = width + "px";
-      row.cells[index].style.minWidth = width + "px";
-    }
-  });
-}
-function resizeColumn(k, handle, event) {
-  var header = handle.closest("th"), table = header && header.closest("table");
-  if (!header || !table) return;
-  var index = header.cellIndex, startX = event.clientX, startWidth = header.getBoundingClientRect().width;
-  var move = function (current) {
-    var width = Math.max(10 * 16, startWidth + current.clientX - startX);
-    setTableColumnWidth(table, index, width);
-    widths[k][header.dataset.rcol] = width;
-  };
-  var stop = function () {
-    handle.removeEventListener("pointermove", move);
-    handle.removeEventListener("pointerup", stop);
-    handle.removeEventListener("pointercancel", stop);
-  };
-  event.preventDefault();
-  event.stopPropagation();
-  handle.addEventListener("pointermove", move);
-  handle.addEventListener("pointerup", stop);
-  handle.addEventListener("pointercancel", stop);
-  handle.setPointerCapture(event.pointerId);
-}
 
 function render(k) {
   var st = S[k], pane = $("#wrap-" + k); if (!st.got) return;
@@ -243,34 +221,19 @@ function render(k) {
   st.sig = sig;
   var ae = document.activeElement;
   var fo = ae && pane.contains(ae) && ae.dataset ? { r: ae.dataset.r, c: ae.dataset.c, hc: ae.dataset.hc, s: ae.selectionStart } : null;
-  var head = h("tr", {}, [h("th", { class: "n", text: "Field" })]);
-  st.rows.forEach(function (r, i) {
-    var del = editable(h("button", { class: "mini", "data-delete": r.id, text: "Delete" }));
-    arm(del, "Sure?", function () {
-      st.rows = st.rows.filter(function (z) { return z.id !== r.id; }); render(k);
-      api("deleteRow", { sheet: k, rowId: r.id, by: me() }).catch(fail);
-    });
-    var rowHeader = h("th", { "data-rcol": r.id }, [h("div", { class: "row-head" }, [
-      h("span", { text: "Row " + (i + 1) }), del,
-      h("span", { class: "resize-handle", role: "separator", "aria-label": "Resize column", onpointerdown: function (event) {
-        resizeColumn(k, event.currentTarget, event);
-      } })
-    ])]);
-    var savedWidth = widths[k][r.id];
-    if (savedWidth) {
-      rowHeader.style.width = savedWidth + "px";
-      rowHeader.style.minWidth = savedWidth + "px";
-    }
-    head.append(rowHeader);
-  });
-  var body = h("tbody");
+  var head = h("tr", {}, [h("th", { class: "n", text: "#" })]);
   st.cols.forEach(function (c) {
     var inp = editable(h("input", { class: "h", "data-hc": c.id, "aria-label": "Column name" })); inp.value = c.name;
     inp.addEventListener("input", function () { c.name = inp.value; later(k + "cols", function () { return saveCols(k); }, 600); });
     var x = editable(h("button", { class: "mini", title: "Delete column", text: "✕" }));
     arm(x, "Sure?", function () { st.cols = st.cols.filter(function (z) { return z.id !== c.id; }); render(k); saveCols(k).catch(fail); });
-    var tr = h("tr", {}, [h("th", {}, [h("div", { class: "hc" }, [inp, x])])]);
-    st.rows.forEach(function (r) {
+    head.append(h("th", {}, [h("div", { class: "hc" }, [inp, x])]));
+  });
+  head.append(h("th", { text: "Last edit" }), h("th", { class: "x" }));
+  var body = h("tbody");
+  st.rows.forEach(function (r, i) {
+    var tr = h("tr", {}, [h("td", { class: "n", text: String(i + 1) })]);
+    st.cols.forEach(function (c) {
       var f;
       if (c.type === "status") {
         f = editable(h("select", { "data-r": r.id, "data-c": c.id, "aria-label": c.name }));
@@ -285,16 +248,15 @@ function render(k) {
       if (c.type !== "status") updatePreview(cell, f.value);
       tr.append(cell);
     });
-    body.append(tr);
+    tr.append(h("td", { class: "l", "data-by": r.id, text: fmt(r) }));
+    var del = editable(h("button", { class: "mini", "data-delete": r.id, text: "Delete" }));
+    arm(del, "Sure?", function () {
+      st.rows = st.rows.filter(function (z) { return z.id !== r.id; }); render(k);
+      api("deleteRow", { sheet: k, rowId: r.id, by: me() }).catch(fail);
+    });
+    tr.append(h("td", { class: "x" }, [del])); body.append(tr);
   });
-  var edits = h("tr", {}, [h("th", { text: "Last edit" })]);
-  st.rows.forEach(function (r) { edits.append(h("td", { class: "l", "data-by": r.id, text: fmt(r) })); });
-  body.append(edits);
-  var table = h("table", {}, [h("thead", {}, [head]), body]);
-  pane.replaceChildren(table);
-  st.rows.forEach(function (r, i) {
-    if (widths[k][r.id]) setTableColumnWidth(table, i + 1, widths[k][r.id]);
-  });
+  pane.replaceChildren(h("table", {}, [h("thead", {}, [head]), body]));
   $$("textarea", pane).forEach(size);
   if (fo) {
     var t = pane.querySelector(fo.hc ? '[data-hc="' + fo.hc + '"]' : '[data-r="' + fo.r + '"][data-c="' + fo.c + '"]');
