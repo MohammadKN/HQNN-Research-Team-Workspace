@@ -192,12 +192,13 @@ function later(key, fn, ms) {
   }, ms);
 }
 function saveCols(k) { return api("saveCols", { sheet: k, cols: S[k].cols, by: me() }); }
+function sheetData(k) { return { sheet: k, cols: S[k].cols, by: me() }; }
 function saveCell(k, rid, cid, val, ms) {
   var key = k + "|" + rid + "|" + cid;
   var row = S[k].rows.find(function (r) { return r.id === rid; }); if (row) row.v[cid] = val;
   dirty[key] = { value: val, at: Date.now() };
   later(key, function () {
-    return api("updateCell", { sheet: k, rowId: rid, colId: cid, value: val, by: me() }).catch(function (e) {
+    return api("updateCell", { sheet: k, cols: S[k].cols, rowId: rid, colId: cid, value: val, by: me() }).catch(function (e) {
       if (dirty[key] && dirty[key].value === val) delete dirty[key];
       throw e;
     });
@@ -291,7 +292,7 @@ function render(k) {
     var del = editable(h("button", { class: "mini", "data-delete": r.id, text: "Delete" }));
     arm(del, "Sure?", function () {
       st.rows = st.rows.filter(function (z) { return z.id !== r.id; }); render(k);
-      api("deleteRow", { sheet: k, rowId: r.id, by: me() }).catch(fail);
+      api("deleteRow", { sheet: k, cols: S[k].cols, rowId: r.id, by: me() }).catch(fail);
     });
     tr.append(h("td", { class: "x" }, [del])); body.append(tr);
   });
@@ -385,17 +386,27 @@ KEYS.concat("guide").forEach(function (k) {
 });
 KEYS.forEach(function (k) {
   var bar = h("div", { class: "bar" }, [
-    editable(h("button", { class: "btn", text: "+ Add row", onclick: function () { if (!requireEditor()) return; api("addRow", { sheet: k, by: me() }).then(refresh).catch(fail); } })),
-    editable(h("button", { class: "btn alt", text: "+ Add column", onclick: function () {
+    editable(h("button", { class: "btn", text: "+ Add row", onclick: function () {
       if (!requireEditor()) return;
-      var c = { id: "c" + Date.now().toString(36), name: "New column", type: "text" };
-      S[k].cols.push(c); render(k); saveCols(k).catch(fail);
-      var i = $('[data-hc="' + c.id + '"]'); if (i) { i.focus(); i.select(); }
+      api("addRow", sheetData(k)).then(refresh).catch(fail);
+    } })),
+    editable(h("button", { class: "btn alt", text: "+ Add column", onclick: function () {
+        if (!requireEditor()) return;
+        var c = { id: "c" + Date.now().toString(36), name: "New column", type: "text" };
+        var previous = S[k].cols.slice();
+        S[k].cols.push(c); render(k);
+        saveCols(k).then(function () {
+          var i = $('[data-hc="' + c.id + '"]'); if (i) { i.focus(); i.select(); }
+        }).catch(function (e) {
+          S[k].cols = previous;
+          render(k);
+          fail(e);
+        });
     } }))
   ]);
   if (SHEETS[k].starter) bar.append(editable(h("button", { class: "btn alt", text: "Add starter criteria", onclick: function () {
     if (!requireEditor()) return;
-    api("addRows", { sheet: k, by: me(), rows: SHEETS[k].starter.map(function (s) { return { c1: s }; }) }).then(refresh).catch(fail);
+    api("addRows", { sheet: k, cols: S[k].cols, by: me(), rows: SHEETS[k].starter.map(function (s) { return { c1: s }; }) }).then(refresh).catch(fail);
   } })));
   bar.append(h("button", { class: "btn alt", text: "Export CSV", onclick: function () {
     var a = h("a", { href: URL.createObjectURL(new Blob([csv(k)], { type: "text/csv" })), download: "hqnn_" + k + ".csv" });
