@@ -18,7 +18,7 @@ function doPost(e) {
     if (r.token !== TOKEN) return out({ error: "Bad token" });
     var fn = A[r.action];
     if (!fn) return out({ error: "Unknown action" });
-    if (!allowedUser(r.by)) return out({ error: "Enter an approved team member name to view or edit the workspace." });
+    if (r.action !== "getAll" && !allowedUser(r.by)) return out({ error: "Enter an approved team member name before editing." });
     if (r.action !== "getAll") { lock.waitLock(20000); locked = true; }
     return out(fn(SpreadsheetApp.getActiveSpreadsheet(), r));
   } catch (err) {
@@ -71,17 +71,7 @@ function writeHeader(t, cols) {
 function tab(ss, key, cols) {
   var t = ss.getSheetByName(key);
   if (!t) { t = ss.insertSheet(key); writeHeader(t, cols); t.setFrozenRows(1); }
-  else if (t.getLastRow() === 0) writeHeader(t, cols);
   return t;
-}
-function columnsFor(ss, key, fallback) {
-  var cols = getCols(ss, key);
-  if (!cols) {
-    if (!fallback || !fallback.length) throw new Error("Column definitions are missing for " + key);
-    cols = fallback;
-    setCols(ss, key, cols);
-  }
-  return cols;
 }
 function rowIndex(t, id) {
   var n = t.getLastRow(); if (n < 2) return -1;
@@ -117,20 +107,20 @@ var A = {
     return { sheets: res };
   },
   addRow: function (ss, r) {
-    var cols = columnsFor(ss, r.sheet, r.cols), t = tab(ss, r.sheet, cols), id = Utilities.getUuid().slice(0, 8);
+    var cols = getCols(ss, r.sheet), t = tab(ss, r.sheet, cols), id = Utilities.getUuid().slice(0, 8);
     appendRows(t, [newRow(cols, id, r.by, r.values)]);
     recordEdit(ss, r.sheet, id, r.by);
     return { id: id };
   },
   addRows: function (ss, r) {
-    var cols = columnsFor(ss, r.sheet, r.cols), t = tab(ss, r.sheet, cols);
+    var cols = getCols(ss, r.sheet), t = tab(ss, r.sheet, cols);
     var ids = r.rows.map(function (v) { return Utilities.getUuid().slice(0, 8); });
     appendRows(t, r.rows.map(function (v, i) { return newRow(cols, ids[i], r.by, v); }));
     ids.forEach(function (id) { recordEdit(ss, r.sheet, id, r.by); });
     return { ok: true };
   },
   updateCell: function (ss, r) {
-    var cols = columnsFor(ss, r.sheet, r.cols), t = tab(ss, r.sheet, cols);
+    var cols = getCols(ss, r.sheet), t = tab(ss, r.sheet, cols);
     var i = rowIndex(t, r.rowId), c = cols.map(function (x) { return x.id; }).indexOf(r.colId);
     if (i < 0) throw new Error("Row no longer exists");
     if (c < 0) throw new Error("Column no longer exists");
@@ -140,14 +130,12 @@ var A = {
     return { ok: true };
   },
   deleteRow: function (ss, r) {
-    var cols = columnsFor(ss, r.sheet, r.cols), t = tab(ss, r.sheet, cols), i = rowIndex(t, r.rowId);
+    var t = tab(ss, r.sheet, getCols(ss, r.sheet)), i = rowIndex(t, r.rowId);
     if (i >= 0) t.deleteRow(i + 2);
     return { ok: true };
   },
   saveCols: function (ss, r) {
-    var old = getCols(ss, r.sheet) || [], nu = r.cols;
-    if (!nu || !nu.length) throw new Error("At least one column is required");
-    var t = tab(ss, r.sheet, nu);
+    var old = getCols(ss, r.sheet), nu = r.cols, t = tab(ss, r.sheet, nu);
     var same = old && old.length === nu.length && old.every(function (c, i) { return c.id === nu[i].id; });
     if (!same) {
       var n = t.getLastRow();

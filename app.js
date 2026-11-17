@@ -38,12 +38,6 @@ function requireEditor() {
   meEl.focus();
   return false;
 }
-function updateAccess() {
-  var allowed = canEdit();
-  document.body.classList.toggle("locked", !allowed);
-  if (allowed) refresh();
-  else note("Enter an approved team member name to view the workspace.", true);
-}
 function imageUrl(value) {
   var url = String(value || "").trim();
   return /^https?:\/\/\S+\.(?:png|jpe?g|gif|webp|svg|bmp|avif)(?:[?#]\S*)?$/i.test(url) ? url : "";
@@ -192,13 +186,12 @@ function later(key, fn, ms) {
   }, ms);
 }
 function saveCols(k) { return api("saveCols", { sheet: k, cols: S[k].cols, by: me() }); }
-function sheetData(k) { return { sheet: k, cols: S[k].cols, by: me() }; }
 function saveCell(k, rid, cid, val, ms) {
   var key = k + "|" + rid + "|" + cid;
   var row = S[k].rows.find(function (r) { return r.id === rid; }); if (row) row.v[cid] = val;
   dirty[key] = { value: val, at: Date.now() };
   later(key, function () {
-    return api("updateCell", { sheet: k, cols: S[k].cols, rowId: rid, colId: cid, value: val, by: me() }).catch(function (e) {
+    return api("updateCell", { sheet: k, rowId: rid, colId: cid, value: val, by: me() }).catch(function (e) {
       if (dirty[key] && dirty[key].value === val) delete dirty[key];
       throw e;
     });
@@ -250,30 +243,34 @@ function render(k) {
   st.sig = sig;
   var ae = document.activeElement;
   var fo = ae && pane.contains(ae) && ae.dataset ? { r: ae.dataset.r, c: ae.dataset.c, hc: ae.dataset.hc, s: ae.selectionStart } : null;
-  var head = h("tr", {}, [h("th", { class: "n", text: "#" })]);
+  var head = h("tr", {}, [h("th", { class: "n", text: "Field" })]);
+  st.rows.forEach(function (r, i) {
+    var del = editable(h("button", { class: "mini", "data-delete": r.id, text: "Delete" }));
+    arm(del, "Sure?", function () {
+      st.rows = st.rows.filter(function (z) { return z.id !== r.id; }); render(k);
+      api("deleteRow", { sheet: k, rowId: r.id, by: me() }).catch(fail);
+    });
+    var rowHeader = h("th", { "data-rcol": r.id }, [h("div", { class: "row-head" }, [
+      h("span", { text: "Row " + (i + 1) }), del,
+      h("span", { class: "resize-handle", role: "separator", "aria-label": "Resize column", onpointerdown: function (event) {
+        resizeColumn(k, event.currentTarget, event);
+      } })
+    ])]);
+    var savedWidth = widths[k][r.id];
+    if (savedWidth) {
+      rowHeader.style.width = savedWidth + "px";
+      rowHeader.style.minWidth = savedWidth + "px";
+    }
+    head.append(rowHeader);
+  });
+  var body = h("tbody");
   st.cols.forEach(function (c) {
     var inp = editable(h("input", { class: "h", "data-hc": c.id, "aria-label": "Column name" })); inp.value = c.name;
     inp.addEventListener("input", function () { c.name = inp.value; later(k + "cols", function () { return saveCols(k); }, 600); });
     var x = editable(h("button", { class: "mini", title: "Delete column", text: "✕" }));
     arm(x, "Sure?", function () { st.cols = st.cols.filter(function (z) { return z.id !== c.id; }); render(k); saveCols(k).catch(fail); });
-    var columnHeader = h("th", { "data-rcol": c.id }, [h("div", { class: "hc" }, [
-      inp, x,
-      h("span", { class: "resize-handle", role: "separator", "aria-label": "Resize column", onpointerdown: function (event) {
-        resizeColumn(k, event.currentTarget, event);
-      } })
-    ])]);
-    var savedWidth = widths[k][c.id];
-    if (savedWidth) {
-      columnHeader.style.width = savedWidth + "px";
-      columnHeader.style.minWidth = savedWidth + "px";
-    }
-    head.append(columnHeader);
-  });
-  head.append(h("th", { text: "Last edit" }), h("th", { class: "x" }));
-  var body = h("tbody");
-  st.rows.forEach(function (r, i) {
-    var tr = h("tr", {}, [h("td", { class: "n", text: String(i + 1) })]);
-    st.cols.forEach(function (c) {
+    var tr = h("tr", {}, [h("th", {}, [h("div", { class: "hc" }, [inp, x])])]);
+    st.rows.forEach(function (r) {
       var f;
       if (c.type === "status") {
         f = editable(h("select", { "data-r": r.id, "data-c": c.id, "aria-label": c.name }));
@@ -288,18 +285,15 @@ function render(k) {
       if (c.type !== "status") updatePreview(cell, f.value);
       tr.append(cell);
     });
-    tr.append(h("td", { class: "l", "data-by": r.id, text: fmt(r) }));
-    var del = editable(h("button", { class: "mini", "data-delete": r.id, text: "Delete" }));
-    arm(del, "Sure?", function () {
-      st.rows = st.rows.filter(function (z) { return z.id !== r.id; }); render(k);
-      api("deleteRow", { sheet: k, cols: S[k].cols, rowId: r.id, by: me() }).catch(fail);
-    });
-    tr.append(h("td", { class: "x" }, [del])); body.append(tr);
+    body.append(tr);
   });
+  var edits = h("tr", {}, [h("th", { text: "Last edit" })]);
+  st.rows.forEach(function (r) { edits.append(h("td", { class: "l", "data-by": r.id, text: fmt(r) })); });
+  body.append(edits);
   var table = h("table", {}, [h("thead", {}, [head]), body]);
   pane.replaceChildren(table);
-  st.cols.forEach(function (c, i) {
-    if (widths[k][c.id]) setTableColumnWidth(table, i + 1, widths[k][c.id]);
+  st.rows.forEach(function (r, i) {
+    if (widths[k][r.id]) setTableColumnWidth(table, i + 1, widths[k][r.id]);
   });
   $$("textarea", pane).forEach(size);
   if (fo) {
@@ -346,10 +340,10 @@ function patch(k) {
   });
 }
 function refresh() {
-  if (!canEdit() || loading || pending > 0 || document.hidden) return Promise.resolve();
+  if (loading || pending > 0 || document.hidden) return Promise.resolve();
   loading = true;
   var d = {}; KEYS.forEach(function (k) { d[k] = SHEETS[k].cols; });
-  return api("getAll", { defaults: d, by: me() }).then(function (j) {
+  return api("getAll", { defaults: d }).then(function (j) {
     KEYS.forEach(function (k) {
       var s = j.sheets[k]; if (!s) return;
       s.rows.forEach(function (r) {
@@ -386,27 +380,17 @@ KEYS.concat("guide").forEach(function (k) {
 });
 KEYS.forEach(function (k) {
   var bar = h("div", { class: "bar" }, [
-    editable(h("button", { class: "btn", text: "+ Add row", onclick: function () {
-      if (!requireEditor()) return;
-      api("addRow", sheetData(k)).then(refresh).catch(fail);
-    } })),
+    editable(h("button", { class: "btn", text: "+ Add row", onclick: function () { if (!requireEditor()) return; api("addRow", { sheet: k, by: me() }).then(refresh).catch(fail); } })),
     editable(h("button", { class: "btn alt", text: "+ Add column", onclick: function () {
-        if (!requireEditor()) return;
-        var c = { id: "c" + Date.now().toString(36), name: "New column", type: "text" };
-        var previous = S[k].cols.slice();
-        S[k].cols.push(c); render(k);
-        saveCols(k).then(function () {
-          var i = $('[data-hc="' + c.id + '"]'); if (i) { i.focus(); i.select(); }
-        }).catch(function (e) {
-          S[k].cols = previous;
-          render(k);
-          fail(e);
-        });
+      if (!requireEditor()) return;
+      var c = { id: "c" + Date.now().toString(36), name: "New column", type: "text" };
+      S[k].cols.push(c); render(k); saveCols(k).catch(fail);
+      var i = $('[data-hc="' + c.id + '"]'); if (i) { i.focus(); i.select(); }
     } }))
   ]);
   if (SHEETS[k].starter) bar.append(editable(h("button", { class: "btn alt", text: "Add starter criteria", onclick: function () {
     if (!requireEditor()) return;
-    api("addRows", { sheet: k, cols: S[k].cols, by: me(), rows: SHEETS[k].starter.map(function (s) { return { c1: s }; }) }).then(refresh).catch(fail);
+    api("addRows", { sheet: k, by: me(), rows: SHEETS[k].starter.map(function (s) { return { c1: s }; }) }).then(refresh).catch(fail);
   } })));
   bar.append(h("button", { class: "btn alt", text: "Export CSV", onclick: function () {
     var a = h("a", { href: URL.createObjectURL(new Blob([csv(k)], { type: "text/csv" })), download: "hqnn_" + k + ".csv" });
@@ -419,17 +403,16 @@ KEYS.forEach(function (k) {
 show("papers");
 
 meEl.value = localStorage.getItem("hqnn_name") || "";
-document.body.classList.add("locked");
 meEl.addEventListener("input", function () {
   try { localStorage.setItem("hqnn_name", meEl.value); } catch (e) {}
   KEYS.forEach(function (k) { render(k); });
-  updateAccess();
+  note(canEdit() ? "Ready to edit as " + me() + "." : "Enter an approved team member name to edit.", !canEdit());
 });
 
 if (!CFG.API_URL || CFG.API_URL.indexOf("PASTE_") === 0) {
   note("Not connected yet. Open config.js and paste your Apps Script web app URL (see README.md).", true);
 } else {
-  updateAccess(); setInterval(refresh, CFG.POLL_MS || 8000);
+  refresh(); setInterval(refresh, CFG.POLL_MS || 8000);
   document.addEventListener("visibilitychange", refresh);
 }
 })();
